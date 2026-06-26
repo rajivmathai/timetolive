@@ -914,7 +914,7 @@ function CoachPage({ config, events }) {
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
-function SettingsPage({ config, setConfig, setPage }) {
+function SettingsPage({ config, setConfig, setPage, onReset }) {
   const [currentAge, setCurrentAge] = useState(config.currentAge);
   const [targetAge, setTargetAge] = useState(config.targetAge);
 
@@ -956,6 +956,23 @@ function SettingsPage({ config, setConfig, setPage }) {
         </select>
 
         <button onClick={() => setConfig({ ...config, currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>Update Profile</button>
+      </div>
+
+      <div style={{ ...card, padding: 20, marginTop: 16, borderColor: "rgba(236,72,153,0.25)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.pink, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Danger Zone</div>
+        <p style={{ fontSize: 13, color: T.muted, margin: "0 0 14px", lineHeight: 1.5 }}>
+          Clears your profile, events, reflections, and milestones from this device and starts fresh.
+        </p>
+        <button
+          onClick={() => {
+            if (window.confirm("Reset everything? This permanently deletes your saved data on this device and can't be undone.")) {
+              onReset();
+            }
+          }}
+          style={{ ...btnOutline, width: "100%", padding: 12, color: T.pink, borderColor: "rgba(236,72,153,0.35)" }}
+        >
+          Reset all data
+        </button>
       </div>
     </div>
   );
@@ -1099,16 +1116,48 @@ function Onboarding({ onComplete }) {
 
 // ─── Main App ────────────────────────────────────────────────────────────────
 
+// ─── Persistence (localStorage) ──────────────────────────────────────────────
+const STORAGE_KEY = "timetolive.v1";
+
+function loadStored() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function TimeToLive() {
-  const [config, setConfig] = useState(null);
+  // Lazy initializers run once on mount, restoring the user's saved data.
+  const [config, setConfig] = useState(() => loadStored().config ?? null);
   const [page, setPage] = useState("dashboard");
-  const [events, setEvents] = useState({});
-  const [reflections, setReflections] = useState([]);
-  const [milestones, setMilestones] = useState([]);
+  const [events, setEvents] = useState(() => loadStored().events ?? {});
+  const [reflections, setReflections] = useState(() => loadStored().reflections ?? []);
+  const [milestones, setMilestones] = useState(() => loadStored().milestones ?? []);
+
+  // Persist whenever the user's data changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ config, events, reflections, milestones })
+      );
+    } catch {}
+  }, [config, events, reflections, milestones]);
 
   const handleOnboard = (cfg, importedEvents) => {
     setConfig(cfg);
     if (importedEvents) setEvents(importedEvents);
+    setPage("dashboard");
+  };
+
+  const resetAll = () => {
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    setEvents({});
+    setReflections([]);
+    setMilestones([]);
+    setConfig(null);
     setPage("dashboard");
   };
 
@@ -1125,7 +1174,7 @@ export default function TimeToLive() {
       case "reflections": return <ReflectionsPage reflections={reflections} setReflections={setReflections} events={events} />;
       case "milestones": return <MilestonesPage milestones={milestones} setMilestones={setMilestones} />;
       case "coach": return <CoachPage config={config} events={events} />;
-      case "settings": return <SettingsPage config={config} setConfig={setConfig} setPage={setPage} />;
+      case "settings": return <SettingsPage config={config} setConfig={setConfig} setPage={setPage} onReset={resetAll} />;
       default: return null;
     }
   };
