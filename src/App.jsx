@@ -407,7 +407,7 @@ function DotGrid({ birthYear, events, onDotClick, startYear, endYear, compact })
           <span style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: T.text }}>{yr}</span>
           <span style={{ fontSize: 9, color: T.dim, marginLeft: 3 }}>{age}</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: compact ? 4 : 8, flex: 1 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(12, minmax(${compact ? 18 : 26}px, 1fr))`, gap: compact ? 4 : 8, flex: 1, justifyItems: "center" }}>
           {dots}
         </div>
       </div>
@@ -570,7 +570,7 @@ function DashboardPage({ config, events, setEvents, setPage }) {
       <div style={{ marginTop: 16, overflowX: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <div style={{ width: 58, flexShrink: 0 }} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 8, flex: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(26px, 1fr))", gap: 8, flex: 1 }}>
             {MONTH_COLS.map((m, i) => <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: T.dim }}>{m}</div>)}
           </div>
         </div>
@@ -791,7 +791,7 @@ function TimelinePage({ config, events, setEvents, setPage }) {
       <div style={{ marginTop: 16, overflowX: "auto" }}>
         <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
           <div style={{ width: 58, flexShrink: 0 }} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 4, flex: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(18px, 1fr))", gap: 4, flex: 1 }}>
             {MONTH_COLS.map((m, i) => <div key={i} style={{ textAlign: "center", fontSize: 10, fontWeight: 600, color: T.dim }}>{m}</div>)}
           </div>
         </div>
