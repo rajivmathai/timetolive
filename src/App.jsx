@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from "react";
+import { supabase, isSyncConfigured, STATE_TABLE } from "./supabaseClient";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TimeToLive — Life Planning Timeline
@@ -149,7 +150,7 @@ function BrandTitle({ size = 20 }) {
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-function Sidebar({ page, setPage, currentAge, targetAge, monthsRemaining }) {
+function Sidebar({ page, setPage, currentAge, targetAge, monthsRemaining, session, syncStatus, onAccount }) {
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: "\u{1F3E0}" },
     { id: "planner", label: "This Month", icon: "\u{1F4CB}" },
@@ -208,13 +209,14 @@ function Sidebar({ page, setPage, currentAge, targetAge, monthsRemaining }) {
         })}
       </div>
 
-      <div style={{ borderTop: `1px solid ${T.cardBorder}`, padding: "8px 0" }}>
+      <div style={{ borderTop: `1px solid ${T.cardBorder}`, padding: "10px 16px 8px" }}>
+        <div style={{ marginBottom: 8 }}>
+          <SyncBadge session={session} syncStatus={syncStatus} onClick={onAccount} />
+        </div>
         <button onClick={() => setPage("settings")} style={{
           display: "flex", alignItems: "center", gap: 10, width: "100%",
-          padding: "9px 18px", border: "none", cursor: "pointer",
-          background: page === "settings" ? "rgba(124,58,237,0.15)" : "transparent",
-          borderLeft: page === "settings" ? "3px solid #7C3AED" : "3px solid transparent",
-          color: T.muted, fontSize: 13, fontWeight: 500, textAlign: "left",
+          padding: "9px 2px", border: "none", cursor: "pointer", background: "transparent",
+          color: page === "settings" ? T.text : T.muted, fontSize: 13, fontWeight: 500, textAlign: "left",
         }}>
           <span style={{ fontSize: 15 }}>{"\u2699\uFE0F"}</span> Settings
         </button>
@@ -238,21 +240,22 @@ const MOBILE_MORE = [
   { id: "settings", label: "Settings", icon: "\u2699\uFE0F" },
 ];
 
-function MobileTopBar({ currentAge, monthsRemaining }) {
+function MobileTopBar({ currentAge, monthsRemaining, session, syncStatus, onAccount }) {
   return (
     <div className="ttl-topbar" style={{
       position: "sticky", top: 0, zIndex: 40, alignItems: "center",
-      justifyContent: "space-between", padding: "10px 16px",
+      justifyContent: "space-between", padding: "10px 14px",
       background: "rgba(19,17,28,0.92)", backdropFilter: "blur(10px)",
       borderBottom: `1px solid ${T.cardBorder}`,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <HourglassIcon size={22} /><BrandTitle size={16} />
       </div>
-      <div style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>
-        Age <span style={{ color: T.accentLight, fontWeight: 700 }}>{currentAge}</span>
-        {"\u2002\u00B7\u2002"}
-        <span style={{ color: T.accentLight, fontWeight: 700 }}>{monthsRemaining}</span> mo left
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 12, color: T.muted, fontWeight: 500, whiteSpace: "nowrap" }}>
+          Age <span style={{ color: T.accentLight, fontWeight: 700 }}>{currentAge}</span>
+        </div>
+        <SyncBadge session={session} syncStatus={syncStatus} onClick={onAccount} compact />
       </div>
     </div>
   );
@@ -1142,7 +1145,7 @@ function CoachPage({ config, events }) {
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
-function SettingsPage({ config, setConfig, setPage, onReset }) {
+function SettingsPage({ config, setConfig, setPage, onReset, session, syncStatus, onOpenAuth, onSignOut }) {
   const [currentAge, setCurrentAge] = useState(config.currentAge);
   const [targetAge, setTargetAge] = useState(config.targetAge);
 
@@ -1186,6 +1189,26 @@ function SettingsPage({ config, setConfig, setPage, onReset }) {
         <button onClick={() => setConfig({ ...config, currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>Update Profile</button>
       </div>
 
+      <div style={{ ...card, padding: 20, marginTop: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Account &amp; Sync</div>
+        {!isSyncConfigured ? (
+          <p style={{ fontSize: 13, color: T.muted, margin: 0, lineHeight: 1.6 }}>
+            Your data is saved on this device. Cloud sync isn't configured yet \u2014 add your Supabase keys (see SUPABASE_SETUP.md) and redeploy to sync across devices.
+          </p>
+        ) : session ? (<>
+          <p style={{ fontSize: 13, color: T.muted, margin: "0 0 4px" }}>Signed in as <strong style={{ color: T.text }}>{session.user.email}</strong></p>
+          <p style={{ fontSize: 12, color: T.dim, margin: "0 0 14px" }}>
+            {syncStatus === "saving" ? "Saving\u2026" : syncStatus === "offline" ? "Offline \u2014 changes sync when you reconnect." : syncStatus === "error" ? "Sync error." : "Synced across your devices \u2713"}
+          </p>
+          <button onClick={onSignOut} style={{ ...btnOutline, width: "100%", padding: 11 }}>Sign out</button>
+        </>) : (<>
+          <p style={{ fontSize: 13, color: T.muted, margin: "0 0 14px", lineHeight: 1.6 }}>
+            Sign in to sync your timeline, events, reflections, and milestones across your computer and iPhone.
+          </p>
+          <button onClick={onOpenAuth} style={{ ...btn, width: "100%", padding: 11 }}>Sign in or create account</button>
+        </>)}
+      </div>
+
       <div style={{ ...card, padding: 20, marginTop: 16, borderColor: "rgba(236,72,153,0.25)" }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: T.pink, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Danger Zone</div>
         <p style={{ fontSize: 13, color: T.muted, margin: "0 0 14px", lineHeight: 1.5 }}>
@@ -1208,7 +1231,7 @@ function SettingsPage({ config, setConfig, setPage, onReset }) {
 
 // ─── Onboarding (with emotional hook + retroactive events) ───────────────────
 
-function Onboarding({ onComplete }) {
+function Onboarding({ onComplete, onOpenAuth, session }) {
   const [step, setStep] = useState(0);
   const [currentAge, setCurrentAge] = useState(30);
   const [targetAge, setTargetAge] = useState(90);
@@ -1231,6 +1254,11 @@ function Onboarding({ onComplete }) {
           See your life in months. Plan with purpose. Make every moment count.
         </p>
         <button onClick={() => setStep(1)} style={{ ...btn, marginTop: 28, padding: "13px 44px", fontSize: 15 }}>Get Started</button>
+        {isSyncConfigured && !session && (
+          <button onClick={onOpenAuth} style={{ background: "none", border: "none", color: T.accentLight, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 16 }}>
+            Already have an account? Sign in
+          </button>
+        )}
       </div>
     );
   }
@@ -1344,6 +1372,126 @@ function Onboarding({ onComplete }) {
 
 // ─── Main App ────────────────────────────────────────────────────────────────
 
+// ─── Cloud sync (Supabase) ───────────────────────────────────────────────────
+
+function readJSON(key) {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch { return null; }
+}
+async function cloudLoad(uid) {
+  if (!supabase) return { ok: false };
+  const { data, error } = await supabase.from(STATE_TABLE).select("data").eq("user_id", uid).maybeSingle();
+  if (error) return { ok: false, error };
+  return { ok: true, data: data?.data ?? null };
+}
+async function cloudSave(uid, data) {
+  if (!supabase) return { ok: false };
+  const { error } = await supabase.from(STATE_TABLE).upsert({ user_id: uid, data, updated_at: new Date().toISOString() });
+  return { ok: !error, error };
+}
+
+function SyncBadge({ session, syncStatus, onClick, compact }) {
+  const label = !isSyncConfigured ? "Local only"
+    : !session ? "Sign in to sync"
+    : syncStatus === "saving" ? "Saving\u2026"
+    : syncStatus === "offline" ? "Offline"
+    : syncStatus === "error" ? "Sync error"
+    : "Synced";
+  const good = session && (syncStatus === "synced" || syncStatus === "idle");
+  const warn = session && (syncStatus === "offline" || syncStatus === "error");
+  const color = good ? "#34D399" : warn ? "#F59E0B" : T.muted;
+  return (
+    <button onClick={onClick} title="Account & sync" style={{
+      display: "flex", alignItems: "center", gap: 6, padding: compact ? "5px 10px" : "7px 12px",
+      borderRadius: 20, border: `1px solid ${T.cardBorder}`, background: "rgba(255,255,255,0.04)",
+      color, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      {label}
+    </button>
+  );
+}
+
+function AuthModal({ session, syncStatus, onSignOut, recovery, onClose }) {
+  const [mode, setMode] = useState(recovery ? "reset" : "signin"); // signin | signup | forgot | reset
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const run = async (fn) => { setBusy(true); setErr(null); setMsg(null); try { await fn(); } catch (e) { setErr(e?.message || String(e)); } finally { setBusy(false); } };
+  const signIn = () => run(async () => { const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password }); if (error) throw error; onClose(); });
+  const signUp = () => run(async () => {
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    if (error) throw error;
+    if (data.session) onClose(); else setMsg("Almost there! Check your email for a confirmation link, then come back and sign in.");
+  });
+  const forgot = () => run(async () => { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin }); if (error) throw error; setMsg("Password reset email sent. Open the link on this device, then you'll be able to set a new password."); });
+  const resetPw = () => run(async () => { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; setMsg("Password updated \u2014 you're signed in."); setTimeout(onClose, 1000); });
+
+  const wrap = (children) => (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: 16 }} onClick={onClose}>
+      <div style={{ ...card, background: T.bgAlt, padding: 26, width: 400, maxWidth: "92vw", border: "1px solid rgba(124,58,237,0.25)" }} onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>
+  );
+
+  if (!isSyncConfigured) {
+    return wrap(<>
+      <h3 style={{ margin: "0 0 8px", color: T.text, fontSize: 20 }}>Cloud sync not set up yet</h3>
+      <p style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, margin: "0 0 18px" }}>
+        Your data is being saved on this device. To sync across your computer and iPhone, add your Supabase keys (see SUPABASE_SETUP.md), then redeploy.
+      </p>
+      <button onClick={onClose} style={{ ...btn, width: "100%", padding: 12 }}>Got it</button>
+    </>);
+  }
+
+  if (session) {
+    return wrap(<>
+      <h3 style={{ margin: "0 0 4px", color: T.text, fontSize: 20 }}>Your account</h3>
+      <p style={{ fontSize: 13, color: T.muted, margin: "0 0 4px" }}>{session.user.email}</p>
+      <p style={{ fontSize: 12, color: T.dim, margin: "0 0 20px" }}>
+        Status: {syncStatus === "saving" ? "saving\u2026" : syncStatus === "offline" ? "offline \u2014 will sync when reconnected" : syncStatus === "error" ? "sync error" : "synced across your devices"}
+      </p>
+      <button onClick={() => { onSignOut(); onClose(); }} style={{ ...btnOutline, width: "100%", padding: 12, marginBottom: 10 }}>Sign out</button>
+      <button onClick={onClose} style={{ ...btn, width: "100%", padding: 12 }}>Close</button>
+    </>);
+  }
+
+  const titles = { signin: "Sign in", signup: "Create account", forgot: "Reset password", reset: "Set a new password" };
+  return wrap(<>
+    <h3 style={{ margin: "0 0 4px", color: T.text, fontSize: 20 }}>{titles[mode]}</h3>
+    <p style={{ fontSize: 12, color: T.dim, margin: "0 0 18px" }}>Sync your timeline across every device.</p>
+
+    {mode !== "reset" && (<>
+      <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Email</label>
+      <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
+    </>)}
+    {mode !== "forgot" && (<>
+      <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>{mode === "reset" ? "New password" : "Password"}</label>
+      <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
+    </>)}
+
+    {err && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 12 }}>{err}</div>}
+    {msg && <div style={{ fontSize: 12, color: "#34D399", marginBottom: 12, lineHeight: 1.5 }}>{msg}</div>}
+
+    {mode === "signin" && <button onClick={signIn} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Sign in"}</button>}
+    {mode === "signup" && <button onClick={signUp} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Create account"}</button>}
+    {mode === "forgot" && <button onClick={forgot} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Send reset email"}</button>}
+    {mode === "reset" && <button onClick={resetPw} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Update password"}</button>}
+
+    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, fontSize: 12 }}>
+      {mode === "signin" && <>
+        <button onClick={() => { setMode("signup"); setErr(null); setMsg(null); }} style={linkBtn}>Create account</button>
+        <button onClick={() => { setMode("forgot"); setErr(null); setMsg(null); }} style={linkBtn}>Forgot password?</button>
+      </>}
+      {(mode === "signup" || mode === "forgot") && <button onClick={() => { setMode("signin"); setErr(null); setMsg(null); }} style={linkBtn}>{"\u2190"} Back to sign in</button>}
+      {mode !== "reset" && <button onClick={onClose} style={{ ...linkBtn, marginLeft: "auto" }}>Close</button>}
+    </div>
+  </>);
+}
+
+const linkBtn = { background: "none", border: "none", color: T.accentLight, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 };
+
 // ─── Persistence (localStorage) ──────────────────────────────────────────────
 const STORAGE_KEY = "timetolive.v1";
 
@@ -1365,15 +1513,103 @@ export default function TimeToLive() {
   const [milestones, setMilestones] = useState(() => loadStored().milestones ?? []);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // Persist whenever the user's data changes.
+  // ── Cloud sync state ──
+  const [session, setSession] = useState(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [recovery, setRecovery] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(isSyncConfigured ? "idle" : "local");
+
+  const stateRef = useRef({ config, events, reflections, milestones });
+  stateRef.current = { config, events, reflections, milestones };
+  const syncReadyRef = useRef(false);
+  const saveTimer = useRef(null);
+
+  const applyState = (s) => {
+    setConfig(s?.config ?? null);
+    setEvents(s?.events ?? {});
+    setReflections(s?.reflections ?? []);
+    setMilestones(s?.milestones ?? []);
+  };
+
+  // Reconcile cloud <-> local data when a user signs in.
+  const handleSignedIn = async (sess) => {
+    setSession(sess);
+    syncReadyRef.current = false;
+    const uid = sess.user.id;
+    const cached = readJSON(`timetolive.user.${uid}`);
+    if (cached?.config) applyState(cached); // instant from cache
+    setSyncStatus("saving");
+    const res = await cloudLoad(uid);
+    if (!res.ok) { setSyncStatus("offline"); syncReadyRef.current = true; return; }
+    if (res.data?.config) {
+      applyState(res.data); // cloud is the source of truth
+      try { localStorage.setItem(`timetolive.user.${uid}`, JSON.stringify(res.data)); } catch {}
+    } else {
+      // Cloud is empty: migrate any work this device already had (e.g. before signing in).
+      const local = stateRef.current;
+      if (local?.config) {
+        await cloudSave(uid, local);
+        try { localStorage.setItem(`timetolive.user.${uid}`, JSON.stringify(local)); } catch {}
+      }
+    }
+    setSyncStatus("synced");
+    syncReadyRef.current = true;
+  };
+
+  // Subscribe to auth changes once on mount.
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ config, events, reflections, milestones })
-      );
-    } catch {}
-  }, [config, events, reflections, milestones]);
+    if (!supabase) return;
+    supabase.auth.getSession().then(({ data }) => { if (data.session) handleSignedIn(data.session); });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
+      if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
+      if (sess) { handleSignedIn(sess); }
+      else {
+        // Signed out: revert to the anonymous local store (no user data left behind).
+        syncReadyRef.current = false;
+        setSession(null);
+        applyState(readJSON(STORAGE_KEY) || {});
+        setSyncStatus(isSyncConfigured ? "idle" : "local");
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Signed-out: persist to the shared local key (original behaviour).
+  useEffect(() => {
+    if (session) return;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ config, events, reflections, milestones })); } catch {}
+  }, [config, events, reflections, milestones, session]);
+
+  // Signed-in: cache locally right away, then push to the cloud (debounced).
+  useEffect(() => {
+    if (!session) return;
+    const uid = session.user.id;
+    const data = { config, events, reflections, milestones };
+    try { localStorage.setItem(`timetolive.user.${uid}`, JSON.stringify(data)); } catch {}
+    if (!syncReadyRef.current) return; // don't push until the initial load finished
+    setSyncStatus("saving");
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      const res = await cloudSave(uid, data);
+      setSyncStatus(res.ok ? "synced" : "offline");
+    }, 800);
+    return () => clearTimeout(saveTimer.current);
+  }, [config, events, reflections, milestones, session]);
+
+  // Flush to the cloud when the network reconnects.
+  useEffect(() => {
+    const onOnline = () => {
+      if (session && syncReadyRef.current) {
+        cloudSave(session.user.id, stateRef.current).then(r => setSyncStatus(r.ok ? "synced" : "offline"));
+      }
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [session]);
+
+  const signOut = async () => { if (supabase) await supabase.auth.signOut(); };
+  const openAccount = () => { setRecovery(false); setAuthOpen(true); };
 
   const handleOnboard = (cfg, importedEvents) => {
     setConfig(cfg);
@@ -1382,7 +1618,11 @@ export default function TimeToLive() {
   };
 
   const resetAll = () => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      if (session) localStorage.removeItem(`timetolive.user.${session.user.id}`);
+    } catch {}
+    if (session) cloudSave(session.user.id, { config: null, events: {}, reflections: [], milestones: [] });
     setEvents({});
     setReflections([]);
     setMilestones([]);
@@ -1390,7 +1630,15 @@ export default function TimeToLive() {
     setPage("dashboard");
   };
 
-  if (!config) return <Onboarding onComplete={handleOnboard} />;
+  const authModalEl = authOpen ? (
+    <AuthModal session={session} syncStatus={syncStatus} onSignOut={signOut} recovery={recovery}
+      onClose={() => { setAuthOpen(false); setRecovery(false); }} />
+  ) : null;
+
+  if (!config) return (<>
+    {authModalEl}
+    <Onboarding onComplete={handleOnboard} onOpenAuth={openAccount} session={session} syncStatus={syncStatus} />
+  </>);
 
   const monthsRem = (config.targetAge - config.currentAge) * 12 - new Date().getMonth();
 
@@ -1403,7 +1651,7 @@ export default function TimeToLive() {
       case "reflections": return <ReflectionsPage reflections={reflections} setReflections={setReflections} events={events} />;
       case "milestones": return <MilestonesPage milestones={milestones} setMilestones={setMilestones} />;
       case "coach": return <CoachPage config={config} events={events} />;
-      case "settings": return <SettingsPage config={config} setConfig={setConfig} setPage={setPage} onReset={resetAll} />;
+      case "settings": return <SettingsPage config={config} setConfig={setConfig} setPage={setPage} onReset={resetAll} session={session} syncStatus={syncStatus} onOpenAuth={openAccount} onSignOut={signOut} />;
       default: return null;
     }
   };
@@ -1414,9 +1662,12 @@ export default function TimeToLive() {
       minHeight: "100vh", background: T.gradientSoft, display: "flex",
     }}>
       <ResponsiveStyles />
-      <Sidebar page={page} setPage={setPage} currentAge={config.currentAge} targetAge={config.targetAge} monthsRemaining={monthsRem} />
+      {authModalEl}
+      <Sidebar page={page} setPage={setPage} currentAge={config.currentAge} targetAge={config.targetAge} monthsRemaining={monthsRem}
+        session={session} syncStatus={syncStatus} onAccount={openAccount} />
       <div style={{ flex: 1, minWidth: 0, overflowY: "auto", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-        <MobileTopBar currentAge={config.currentAge} monthsRemaining={monthsRem} />
+        <MobileTopBar currentAge={config.currentAge} monthsRemaining={monthsRem}
+          session={session} syncStatus={syncStatus} onAccount={openAccount} />
         <div className="ttl-page" style={{ flex: 1 }}>{renderPage()}</div>
       </div>
       <BottomNav page={page} setPage={setPage} moreOpen={moreOpen} setMoreOpen={setMoreOpen} />
