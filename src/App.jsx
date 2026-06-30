@@ -161,7 +161,7 @@ function Sidebar({ page, setPage, currentAge, targetAge, monthsRemaining }) {
   ];
 
   return (
-    <div style={{
+    <div className="ttl-sidebar" style={{
       width: 210, minHeight: "100vh", background: "rgba(19,17,28,0.8)",
       borderRight: `1px solid ${T.cardBorder}`, display: "flex",
       flexDirection: "column", padding: "16px 0", flexShrink: 0,
@@ -221,6 +221,114 @@ function Sidebar({ page, setPage, currentAge, targetAge, monthsRemaining }) {
       </div>
     </div>
   );
+}
+
+// ─── Mobile navigation (phone layout) ───────────────────────────────────────
+
+const MOBILE_PRIMARY = [
+  { id: "dashboard", label: "Home", icon: "\u{1F3E0}" },
+  { id: "planner", label: "Month", icon: "\u{1F4CB}" },
+  { id: "timeline", label: "Timeline", icon: "\u{1F4C5}" },
+  { id: "coach", label: "Coach", icon: "\u{1F9ED}" },
+];
+const MOBILE_MORE = [
+  { id: "balance", label: "Life Balance", icon: "\u{1F3AF}" },
+  { id: "reflections", label: "Reflections", icon: "\u{1F4D6}" },
+  { id: "milestones", label: "Milestones", icon: "\u{1F4C8}" },
+  { id: "settings", label: "Settings", icon: "\u2699\uFE0F" },
+];
+
+function MobileTopBar({ currentAge, monthsRemaining }) {
+  return (
+    <div className="ttl-topbar" style={{
+      position: "sticky", top: 0, zIndex: 40, alignItems: "center",
+      justifyContent: "space-between", padding: "10px 16px",
+      background: "rgba(19,17,28,0.92)", backdropFilter: "blur(10px)",
+      borderBottom: `1px solid ${T.cardBorder}`,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <HourglassIcon size={22} /><BrandTitle size={16} />
+      </div>
+      <div style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>
+        Age <span style={{ color: T.accentLight, fontWeight: 700 }}>{currentAge}</span>
+        {"\u2002\u00B7\u2002"}
+        <span style={{ color: T.accentLight, fontWeight: 700 }}>{monthsRemaining}</span> mo left
+      </div>
+    </div>
+  );
+}
+
+function BottomNav({ page, setPage, moreOpen, setMoreOpen }) {
+  const moreActive = moreOpen || MOBILE_MORE.some(m => m.id === page);
+  const Tab = ({ icon, label, active, onClick }) => (
+    <button onClick={onClick} style={{
+      flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+      gap: 3, background: "none", border: "none", cursor: "pointer",
+      padding: "8px 0 4px", color: active ? T.accentLight : T.dim,
+    }}>
+      <span style={{ fontSize: 19, lineHeight: 1 }}>{icon}</span>
+      <span style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
+    </button>
+  );
+  return (
+    <div className="ttl-bottomnav" style={{
+      position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60,
+      background: "rgba(19,17,28,0.96)", backdropFilter: "blur(12px)",
+      borderTop: `1px solid ${T.cardBorder}`,
+      paddingBottom: "env(safe-area-inset-bottom)",
+    }}>
+      {MOBILE_PRIMARY.map(item => (
+        <Tab key={item.id} icon={item.icon} label={item.label}
+          active={!moreOpen && page === item.id}
+          onClick={() => { setMoreOpen(false); setPage(item.id); }} />
+      ))}
+      <Tab icon={"\u2630"} label="More" active={moreActive} onClick={() => setMoreOpen(o => !o)} />
+    </div>
+  );
+}
+
+function MoreSheet({ page, setPage, onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex: 70, background: "rgba(0,0,0,0.5)",
+      display: "flex", alignItems: "flex-end",
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "100%", background: T.bgAlt,
+        borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        borderTop: `1px solid ${T.cardBorder}`, padding: "8px 12px",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
+      }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: T.cardBorder, margin: "6px auto 12px" }} />
+        {MOBILE_MORE.map(item => (
+          <button key={item.id} onClick={() => { setPage(item.id); onClose(); }} style={{
+            display: "flex", alignItems: "center", gap: 12, width: "100%",
+            padding: "14px 12px", border: "none", borderRadius: 12, cursor: "pointer",
+            background: page === item.id ? "rgba(124,58,237,0.15)" : "transparent",
+            color: page === item.id ? T.text : T.muted, fontSize: 15, fontWeight: 600, textAlign: "left",
+          }}>
+            <span style={{ fontSize: 20 }}>{item.icon}</span>{item.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResponsiveStyles() {
+  const css = `
+.ttl-topbar, .ttl-bottomnav { display: none; }
+@media (max-width: 768px) {
+  .ttl-sidebar { display: none !important; }
+  .ttl-topbar { display: flex !important; }
+  .ttl-bottomnav { display: flex !important; }
+  .ttl-page > div { padding: 14px 16px calc(92px + env(safe-area-inset-bottom)) !important; max-width: 100% !important; margin: 0 !important; }
+  .ttl-page h1 { font-size: 22px !important; }
+  .ttl-row { flex-direction: column !important; gap: 16px !important; }
+  .ttl-side { width: 100% !important; flex-shrink: 1 !important; }
+  .ttl-stats { gap: 18px !important; flex-wrap: wrap !important; }
+}`;
+  return <style dangerouslySetInnerHTML={{ __html: css }} />;
 }
 
 // ─── Category Legend ──────────────────────────────────────────────────────────
@@ -355,7 +463,7 @@ function DashboardPage({ config, events, setEvents, setPage }) {
       </div>
       <h1 style={{ textAlign: "center", color: T.text, fontSize: 30, fontWeight: 300, margin: "16px 0 24px", fontStyle: "italic" }}>Your Life Timeline</h1>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: 40, marginBottom: 24 }}>
+      <div className="ttl-stats" style={{ display: "flex", justifyContent: "center", gap: 40, marginBottom: 24 }}>
         {[{ v: config.currentAge, l: "Current Age" }, { v: config.targetAge, l: "Target Age" }, { v: monthsRem, l: "Months Left" }, { v: yearsRem, l: "Years Left" }].map((s, i) => (
           <div key={i} style={{ textAlign: "center" }}>
             <div style={{ fontSize: 34, fontWeight: 700, background: T.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{s.v}</div>
@@ -479,7 +587,7 @@ function PlannerPage({ config, events, setEvents }) {
       </h1>
       <p style={{ color: T.muted, fontSize: 13, margin: "0 0 20px" }}>Plan your days with intention. Tap a day to add activities.</p>
 
-      <div style={{ display: "flex", gap: 24 }}>
+      <div className="ttl-row" style={{ display: "flex", gap: 24 }}>
         {/* Calendar */}
         <div style={{ flex: 1 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 4 }}>
@@ -489,7 +597,7 @@ function PlannerPage({ config, events, setEvents }) {
         </div>
 
         {/* Day detail */}
-        <div style={{ width: 320, flexShrink: 0 }}>
+        <div className="ttl-side" style={{ width: 320, flexShrink: 0 }}>
           {selectedDay ? (
             <div style={{ ...card, padding: 20 }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: T.text, marginBottom: 4 }}>
@@ -860,7 +968,7 @@ function CoachPage({ config, events }) {
         <p style={{ color: T.muted, fontSize: 13 }}>Your AI companion for intentional living. Knows your timeline, events, and balance.</p>
       </div>
 
-      <div style={{ display: "flex", gap: 16 }}>
+      <div className="ttl-row" style={{ display: "flex", gap: 16 }}>
         <div style={{ ...card, flex: 1, display: "flex", flexDirection: "column", minHeight: 420 }}>
           <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.cardBorder}`, fontWeight: 600, color: T.text, fontSize: 14 }}>{"\u{1F4AC}"} Chat</div>
           <div ref={chatRef} style={{ flex: 1, padding: 18, overflowY: "auto", maxHeight: 360 }}>
@@ -885,7 +993,7 @@ function CoachPage({ config, events }) {
           </div>
         </div>
 
-        <div style={{ width: 260, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="ttl-side" style={{ width: 260, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ ...card, padding: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>Conversation Starters</div>
             {COACH_PROMPTS.map((s, i) => (
@@ -1135,6 +1243,7 @@ export default function TimeToLive() {
   const [events, setEvents] = useState(() => loadStored().events ?? {});
   const [reflections, setReflections] = useState(() => loadStored().reflections ?? []);
   const [milestones, setMilestones] = useState(() => loadStored().milestones ?? []);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Persist whenever the user's data changes.
   useEffect(() => {
@@ -1184,8 +1293,14 @@ export default function TimeToLive() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
       minHeight: "100vh", background: T.gradientSoft, display: "flex",
     }}>
+      <ResponsiveStyles />
       <Sidebar page={page} setPage={setPage} currentAge={config.currentAge} targetAge={config.targetAge} monthsRemaining={monthsRem} />
-      <div style={{ flex: 1, overflowY: "auto", minHeight: "100vh" }}>{renderPage()}</div>
+      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <MobileTopBar currentAge={config.currentAge} monthsRemaining={monthsRem} />
+        <div className="ttl-page" style={{ flex: 1 }}>{renderPage()}</div>
+      </div>
+      <BottomNav page={page} setPage={setPage} moreOpen={moreOpen} setMoreOpen={setMoreOpen} />
+      {moreOpen && <MoreSheet page={page} setPage={setPage} onClose={() => setMoreOpen(false)} />}
     </div>
   );
 }
