@@ -568,7 +568,8 @@ function DashboardPage({ config, events, setEvents, setPage }) {
       )}
 
       <div style={{ marginTop: 16, overflowX: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, paddingLeft: 64 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <div style={{ width: 58, flexShrink: 0 }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 8, flex: 1 }}>
             {MONTH_COLS.map((m, i) => <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: T.dim }}>{m}</div>)}
           </div>
@@ -603,12 +604,25 @@ function DashboardPage({ config, events, setEvents, setPage }) {
 
 function PlannerPage({ config, events, setEvents }) {
   const now = new Date();
-  const cy = now.getFullYear(), cm = now.getMonth();
+  const [view, setView] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const cy = view.y, cm = view.m;
   const daysInMonth = new Date(cy, cm + 1, 0).getDate();
   const firstDow = new Date(cy, cm, 1).getDay();
   const [selectedDay, setSelectedDay] = useState(null);
   const [activity, setActivity] = useState("");
   const [actCat, setActCat] = useState("career");
+  const isThisMonth = cy === now.getFullYear() && cm === now.getMonth();
+  const shiftMonth = (delta) => {
+    const d = new Date(cy, cm + delta, 1);
+    setView({ y: d.getFullYear(), m: d.getMonth() });
+    setSelectedDay(null);
+  };
+  const goToday = () => { setView({ y: now.getFullYear(), m: now.getMonth() }); setSelectedDay(null); };
+  const navArrow = {
+    width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.cardBorder}`,
+    background: "rgba(255,255,255,0.05)", color: T.text, fontSize: 20, lineHeight: 1,
+    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  };
 
   // Day-level data stored as events with day key
   const dayKey = (d) => `day-${cy}-${cm}-${d}`;
@@ -635,7 +649,7 @@ function PlannerPage({ config, events, setEvents }) {
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(<div key={`e${i}`} />);
   for (let d = 1; d <= daysInMonth; d++) {
-    const isToday = d === now.getDate();
+    const isToday = isThisMonth && d === now.getDate();
     const isSel = d === selectedDay;
     const acts = dayActivities(d);
     const cats = [...new Set(acts.map(a => a.category))];
@@ -658,9 +672,14 @@ function PlannerPage({ config, events, setEvents }) {
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 900 }}>
-      <h1 style={{ color: T.text, fontSize: 26, fontWeight: 300, fontStyle: "italic", margin: "0 0 4px" }}>
-        {MONTH_FULL[cm]} {cy}
-      </h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "0 0 4px", flexWrap: "wrap" }}>
+        <button onClick={() => shiftMonth(-1)} aria-label="Previous month" style={navArrow}>{"\u2039"}</button>
+        <h1 style={{ color: T.text, fontSize: 26, fontWeight: 300, fontStyle: "italic", margin: 0 }}>
+          {MONTH_FULL[cm]} {cy}
+        </h1>
+        <button onClick={() => shiftMonth(1)} aria-label="Next month" style={navArrow}>{"\u203A"}</button>
+        {!isThisMonth && <button onClick={goToday} style={{ ...btnOutline, padding: "6px 14px", fontSize: 12 }}>Today</button>}
+      </div>
       <p style={{ color: T.muted, fontSize: 13, margin: "0 0 20px" }}>Plan your days with intention. Tap a day to add activities.</p>
 
       <div className="ttl-row" style={{ display: "flex", gap: 24 }}>
@@ -770,7 +789,8 @@ function TimelinePage({ config, events, setEvents, setPage }) {
         </div>
       )}
       <div style={{ marginTop: 16, overflowX: "auto" }}>
-        <div style={{ display: "flex", gap: 4, marginBottom: 6, paddingLeft: 64 }}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+          <div style={{ width: 58, flexShrink: 0 }} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 4, flex: 1 }}>
             {MONTH_COLS.map((m, i) => <div key={i} style={{ textAlign: "center", fontSize: 10, fontWeight: 600, color: T.dim }}>{m}</div>)}
           </div>
