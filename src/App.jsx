@@ -345,6 +345,18 @@ function CategoryLegend() {
   );
 }
 
+// ─── Event helpers (a month holds a list of events) ──────────────────────────
+// Each month slot stores an array of events. Older saves may hold a single event
+// object; normalize so the rest of the app always sees an array.
+function monthEvents(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object" && value.title) return [value];
+  return [];
+}
+function allTimelineEvents(events) {
+  return Object.entries(events).flatMap(([k, v]) => (k.startsWith("day-") ? [] : monthEvents(v)));
+}
+
 // ─── Dot Grid ────────────────────────────────────────────────────────────────
 
 function DotGrid({ birthYear, events, onDotClick, startYear, endYear, compact }) {
@@ -360,23 +372,33 @@ function DotGrid({ birthYear, events, onDotClick, startYear, endYear, compact })
       const isPast = yr < cy || (yr === cy && m < cm);
       const isCurrent = yr === cy && m === cm;
       const ev = events[key];
-      const dotColor = ev ? CAT_MAP[ev.category]?.color || "#888" : null;
+      const evs = monthEvents(ev);
+      const dotColor = evs.length ? CAT_MAP[evs[0].category]?.color || "#888" : null;
 
       dots.push(
         <div key={key} onClick={() => onDotClick?.(yr, m)}
-          style={{
-            width: compact ? 18 : 26, height: compact ? 18 : 26, borderRadius: "50%",
-            background: isCurrent ? "linear-gradient(135deg, #F59E0B, #F97316)"
-              : dotColor ? dotColor
-              : isPast ? "rgba(124,58,237,0.2)"
-              : "rgba(255,255,255,0.08)",
-            cursor: onDotClick ? "pointer" : "default",
-            transition: "transform 0.15s",
-            boxShadow: isCurrent ? "0 0 10px rgba(245,158,11,0.4)" : dotColor ? `0 0 6px ${dotColor}44` : "none",
-          }}
-          onMouseOver={(e) => { e.currentTarget.style.transform = "scale(1.3)"; }}
-          onMouseOut={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-        />
+          style={{ position: "relative", width: compact ? 18 : 26, height: compact ? 18 : 26, cursor: onDotClick ? "pointer" : "default" }}>
+          <div
+            style={{
+              width: "100%", height: "100%", borderRadius: "50%",
+              background: isCurrent ? "linear-gradient(135deg, #F59E0B, #F97316)"
+                : dotColor ? dotColor
+                : isPast ? "rgba(255,255,255,0.05)"
+                : "rgba(255,255,255,0.16)",
+              transition: "transform 0.15s",
+              boxShadow: isCurrent ? "0 0 10px rgba(245,158,11,0.4)" : dotColor ? `0 0 6px ${dotColor}44` : "none",
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.transform = "scale(1.3)"; }}
+            onMouseOut={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+          />
+          {evs.length > 1 && (
+            <div style={{
+              position: "absolute", top: -4, right: -4, minWidth: 13, height: 13, padding: "0 3px",
+              borderRadius: 7, background: "#13111C", border: "1px solid rgba(255,255,255,0.3)",
+              color: "#fff", fontSize: 9, fontWeight: 700, lineHeight: "12px", textAlign: "center", boxSizing: "border-box",
+            }}>{evs.length}</div>
+          )}
+        </div>
       );
     }
     rows.push(
@@ -396,40 +418,94 @@ function DotGrid({ birthYear, events, onDotClick, startYear, endYear, compact })
 
 // ─── Event Modal ─────────────────────────────────────────────────────────────
 
-function EventModal({ year, month, event, onSave, onDelete, onClose }) {
-  const [title, setTitle] = useState(event?.title || "");
-  const [category, setCategory] = useState(event?.category || "career");
-  const [notes, setNotes] = useState(event?.notes || "");
+function EventModal({ year, month, items, onChange, onClose }) {
+  const [editIdx, setEditIdx] = useState(null); // null = adding a new event
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("career");
+  const [notes, setNotes] = useState("");
+
+  const resetForm = () => { setEditIdx(null); setTitle(""); setCategory("career"); setNotes(""); };
+
+  const startEdit = (i) => {
+    const e = items[i];
+    setEditIdx(i); setTitle(e.title || ""); setCategory(e.category || "career"); setNotes(e.notes || "");
+  };
+
+  const save = () => {
+    if (!title.trim()) return;
+    const ev = { title: title.trim(), category, notes };
+    const next = editIdx === null ? [...items, ev] : items.map((it, i) => (i === editIdx ? ev : it));
+    onChange(next);
+    resetForm();
+  };
+
+  const remove = (i) => {
+    onChange(items.filter((_, idx) => idx !== i));
+    if (editIdx === i) resetForm();
+    else if (editIdx !== null && i < editIdx) setEditIdx(editIdx - 1);
+  };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={onClose}>
-      <div style={{ ...card, background: T.bgAlt, padding: 28, width: 420, maxWidth: "90vw", border: `1px solid rgba(124,58,237,0.2)` }} onClick={(e) => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }} onClick={onClose}>
+      <div style={{ ...card, background: T.bgAlt, padding: 24, width: 420, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", border: `1px solid rgba(124,58,237,0.2)` }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ margin: "0 0 4px", color: T.text, fontSize: 20 }}>{MONTH_FULL[month]} {year}</h3>
-        <p style={{ margin: "0 0 20px", fontSize: 13, color: T.muted }}>{event ? "Edit this event" : "Add an event to your timeline"}</p>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: T.muted }}>
+          {items.length === 0 ? "Add an event to your timeline" : `${items.length} event${items.length > 1 ? "s" : ""} this month`}
+        </p>
 
-        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Event Title</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Trip to Japan" style={{ ...inputStyle, marginTop: 6, marginBottom: 16 }} />
+        {/* Existing events for this month */}
+        {items.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            {items.map((e, i) => {
+              const c = CAT_MAP[e.category];
+              const isEditing = editIdx === i;
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 6,
+                  borderRadius: 10, background: isEditing ? "rgba(124,58,237,0.15)" : "rgba(255,255,255,0.04)",
+                  border: `1px solid ${isEditing ? "rgba(124,58,237,0.4)" : T.cardBorder}`,
+                }}>
+                  <div style={{ width: 9, height: 9, borderRadius: "50%", background: c?.color || "#888", flexShrink: 0 }} />
+                  <div onClick={() => startEdit(i)} style={{ flex: 1, cursor: "pointer", minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.title}</div>
+                    <div style={{ fontSize: 11, color: T.dim }}>{c?.label || e.category}</div>
+                  </div>
+                  <button onClick={() => startEdit(i)} title="Edit" style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, padding: 4 }}>{"\u270E"}</button>
+                  <button onClick={() => remove(i)} title="Delete" style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", fontSize: 14, padding: 4 }}>{"\u2715"}</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Category</label>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, marginBottom: 16 }}>
-          {CATEGORIES.map((c) => (
-            <button key={c.key} onClick={() => setCategory(c.key)} style={{
-              padding: "5px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer",
-              background: category === c.key ? c.color : "rgba(255,255,255,0.05)",
-              color: category === c.key ? "#FFF" : T.muted,
-              border: category === c.key ? "none" : `1px solid ${T.cardBorder}`,
-            }}>{c.label}</button>
-          ))}
-        </div>
+        {/* Add / edit form */}
+        <div style={{ borderTop: items.length > 0 ? `1px solid ${T.cardBorder}` : "none", paddingTop: items.length > 0 ? 16 : 0 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>
+            {editIdx === null ? "Add an event" : "Edit event"}
+          </label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Trip to Japan" style={{ ...inputStyle, marginTop: 6, marginBottom: 16 }} />
 
-        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Notes</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Details..."
-          style={{ ...inputStyle, marginTop: 6, marginBottom: 20, resize: "vertical" }} />
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Category</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, marginBottom: 16 }}>
+            {CATEGORIES.map((c) => (
+              <button key={c.key} onClick={() => setCategory(c.key)} style={{
+                padding: "5px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                background: category === c.key ? c.color : "rgba(255,255,255,0.05)",
+                color: category === c.key ? "#FFF" : T.muted,
+                border: category === c.key ? "none" : `1px solid ${T.cardBorder}`,
+              }}>{c.label}</button>
+            ))}
+          </div>
 
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          {event && <button onClick={() => { onDelete(); onClose(); }} style={{ ...btnOutline, color: "#EF4444", borderColor: "rgba(239,68,68,0.3)" }}>Delete</button>}
-          <button onClick={onClose} style={btnOutline}>Cancel</button>
-          <button onClick={() => { if (title.trim()) { onSave({ title, category, notes }); onClose(); } }} style={btn}>{event ? "Update" : "Add Event"}</button>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Notes</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Details..."
+            style={{ ...inputStyle, marginTop: 6, marginBottom: 20, resize: "vertical" }} />
+
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            {editIdx !== null && <button onClick={resetForm} style={btnOutline}>Cancel edit</button>}
+            <button onClick={onClose} style={btnOutline}>Close</button>
+            <button onClick={save} style={btn}>{editIdx === null ? "Add Event" : "Update"}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -445,14 +521,14 @@ function DashboardPage({ config, events, setEvents, setPage }) {
   const birthYear = cy - config.currentAge;
   const monthsRem = (config.targetAge - config.currentAge) * 12 - now.getMonth();
   const yearsRem = config.targetAge - config.currentAge;
-  const evCount = Object.keys(events).length;
+  const evCount = allTimelineEvents(events).length;
   const dashEnd = Math.min(cy + 2, birthYear + config.targetAge);
   const moreYears = (birthYear + config.targetAge) - dashEnd;
 
   // Life balance nudge
   const catCounts = {};
   CATEGORIES.forEach(c => catCounts[c.key] = 0);
-  Object.values(events).forEach(ev => { if (ev && catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  allTimelineEvents(events).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
   const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
   const neglected = total > 3 ? CATEGORIES.filter(c => catCounts[c.key] === 0).map(c => c.label) : [];
 
@@ -515,9 +591,9 @@ function DashboardPage({ config, events, setEvents, setPage }) {
         <button onClick={() => setPage("planner")} style={btnOutline}>{"\u{1F4CB}"} Plan This Month</button>
       </div>
 
-      {modal && <EventModal year={modal.year} month={modal.month} event={events[`${modal.year}-${modal.month}`]}
-        onSave={(ev) => setEvents(p => ({ ...p, [`${modal.year}-${modal.month}`]: ev }))}
-        onDelete={() => setEvents(p => { const n = { ...p }; delete n[`${modal.year}-${modal.month}`]; return n; })}
+      {modal && <EventModal year={modal.year} month={modal.month}
+        items={monthEvents(events[`${modal.year}-${modal.month}`])}
+        onChange={(arr) => setEvents(p => { const k = `${modal.year}-${modal.month}`; const n = { ...p }; if (arr.length) n[k] = arr; else delete n[k]; return n; })}
         onClose={() => setModal(null)} />}
     </div>
   );
@@ -655,7 +731,17 @@ function TimelinePage({ config, events, setEvents, setPage }) {
   const birthYear = now.getFullYear() - config.currentAge;
   const endYear = birthYear + config.targetAge;
   const totalMonths = config.targetAge * 12;
-  const evCount = Object.keys(events).filter(k => !k.startsWith("day-")).length;
+  const evCount = allTimelineEvents(events).length;
+  const monthsPlanned = Object.entries(events).filter(([k, v]) => !k.startsWith("day-") && monthEvents(v).length).length;
+  const cy = now.getFullYear();
+  const [showPast, setShowPast] = useState(false);
+  const gridStart = showPast ? birthYear : cy;
+  const pastYears = Math.max(0, cy - birthYear);
+  const pastEventCount = Object.entries(events).reduce((sum, [k, v]) => {
+    if (k.startsWith("day-")) return sum;
+    const yr = parseInt(k.split("-")[0], 10);
+    return sum + (yr < cy ? monthEvents(v).length : 0);
+  }, 0);
 
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1200 }}>
@@ -666,10 +752,23 @@ function TimelinePage({ config, events, setEvents, setPage }) {
           <div style={{ fontSize: 12, color: T.dim }}>Birth to age {config.targetAge} &middot; {totalMonths} months</div>
         </div>
         <div style={{ display: "flex", gap: 16, fontSize: 12, color: T.muted }}>
-          <span>{evCount} events</span><span>{totalMonths > 0 ? Math.round((evCount / totalMonths) * 100) : 0}% planned</span>
+          <span>{evCount} events</span><span>{totalMonths > 0 ? Math.round((monthsPlanned / totalMonths) * 100) : 0}% planned</span>
         </div>
       </div>
       <CategoryLegend />
+      {pastYears > 0 && (
+        <div onClick={() => setShowPast(s => !s)} style={{
+          ...card, marginTop: 12, padding: "10px 16px", display: "flex", alignItems: "center",
+          justifyContent: "space-between", cursor: "pointer", background: "rgba(255,255,255,0.03)",
+        }}>
+          <span style={{ fontSize: 13, color: T.muted }}>
+            <span style={{ color: T.accentLight, fontWeight: 700, marginRight: 8 }}>{showPast ? "\u25BE" : "\u25B8"}</span>
+            {showPast ? "Hide" : "Show"} {pastYears} past {pastYears === 1 ? "year" : "years"}
+            {pastEventCount > 0 && <span style={{ color: T.dim }}> &middot; {pastEventCount} {pastEventCount === 1 ? "event" : "events"}</span>}
+          </span>
+          <span style={{ fontSize: 11, color: T.dim }}>{showPast ? "collapse to today" : "timeline starts at this year"}</span>
+        </div>
+      )}
       <div style={{ marginTop: 16, overflowX: "auto" }}>
         <div style={{ display: "flex", gap: 4, marginBottom: 6, paddingLeft: 64 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 4, flex: 1 }}>
@@ -677,12 +776,12 @@ function TimelinePage({ config, events, setEvents, setPage }) {
           </div>
         </div>
         <div style={{ maxHeight: "68vh", overflowY: "auto" }}>
-          <DotGrid birthYear={birthYear} events={events} onDotClick={(yr, m) => setModal({ year: yr, month: m })} startYear={birthYear} endYear={endYear} compact />
+          <DotGrid birthYear={birthYear} events={events} onDotClick={(yr, m) => setModal({ year: yr, month: m })} startYear={gridStart} endYear={endYear} compact />
         </div>
       </div>
-      {modal && <EventModal year={modal.year} month={modal.month} event={events[`${modal.year}-${modal.month}`]}
-        onSave={(ev) => setEvents(p => ({ ...p, [`${modal.year}-${modal.month}`]: ev }))}
-        onDelete={() => setEvents(p => { const n = { ...p }; delete n[`${modal.year}-${modal.month}`]; return n; })}
+      {modal && <EventModal year={modal.year} month={modal.month}
+        items={monthEvents(events[`${modal.year}-${modal.month}`])}
+        onChange={(arr) => setEvents(p => { const k = `${modal.year}-${modal.month}`; const n = { ...p }; if (arr.length) n[k] = arr; else delete n[k]; return n; })}
         onClose={() => setModal(null)} />}
     </div>
   );
@@ -694,8 +793,9 @@ function BalancePage({ events, config }) {
   const catCounts = {};
   CATEGORIES.forEach(c => catCounts[c.key] = 0);
   // Count timeline events
-  Object.entries(events).forEach(([k, ev]) => {
-    if (!k.startsWith("day-") && ev && catCounts[ev.category] !== undefined) catCounts[ev.category]++;
+  Object.entries(events).forEach(([k, v]) => {
+    if (k.startsWith("day-")) return;
+    monthEvents(v).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
   });
   // Count daily activities
   Object.entries(events).forEach(([k, ev]) => {
@@ -785,7 +885,7 @@ function ReflectionsPage({ reflections, setReflections, events }) {
   // Generate retrospective prompt
   const catCounts = {};
   CATEGORIES.forEach(c => catCounts[c.key] = 0);
-  Object.values(events).forEach(ev => { if (ev?.category && catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  allTimelineEvents(events).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
   const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
   const emptyCategories = total >= 3 ? CATEGORIES.filter(c => catCounts[c.key] === 0) : [];
   const retroPrompt = emptyCategories.length > 0
@@ -923,7 +1023,7 @@ function CoachPage({ config, events }) {
   // Generate context-aware responses
   const catCounts = {};
   CATEGORIES.forEach(c => catCounts[c.key] = 0);
-  Object.values(events).forEach(ev => { if (ev?.category && catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  allTimelineEvents(events).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
   const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
   const yearsLeft = config.targetAge - config.currentAge;
 
@@ -1174,7 +1274,7 @@ function Onboarding({ onComplete }) {
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 500, marginBottom: 20 }}>
         {LIFE_PRESETS.map((preset, i) => {
-          const isAdded = Object.values(importEvents).some(e => e.title === preset.title);
+          const isAdded = Object.values(importEvents).flat().some(e => e.title === preset.title);
           return (
             <button key={i} onClick={() => {
               if (!isAdded) { setSelectedPreset(preset); setPresetYear(""); }
@@ -1202,16 +1302,16 @@ function Onboarding({ onComplete }) {
             if (presetYear) {
               const yr = parseInt(presetYear);
               const key = `${yr}-6`;
-              setImportEvents(p => ({ ...p, [key]: { title: selectedPreset.title, category: selectedPreset.category, notes: "" } }));
+              setImportEvents(p => ({ ...p, [key]: [...(p[key] || []), { title: selectedPreset.title, category: selectedPreset.category, notes: "" }] }));
               setSelectedPreset(null);
             }
           }} style={{ ...btn, width: "100%", padding: 10, fontSize: 13 }}>Add to Timeline</button>
         </div>
       )}
 
-      {Object.keys(importEvents).length > 0 && (
+      {Object.values(importEvents).flat().length > 0 && (
         <div style={{ fontSize: 13, color: T.accentLight, marginBottom: 12 }}>
-          {Object.keys(importEvents).length} events added to your story
+          {Object.values(importEvents).flat().length} events added to your story
         </div>
       )}
 
