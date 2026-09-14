@@ -273,9 +273,9 @@ function IntentionsPage({ intentions, setIntentions }) {
   return (
     <div className="ttl-fade" style={{ padding: "18px 20px 40px", maxWidth: 620, margin: "0 auto" }}>
       <div style={label}>Legacy</div>
-      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 25, color: T.text, margin: "8px 0 6px" }}>What will you leave behind?</h1>
+      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 25, color: T.text, margin: "8px 0 6px" }}>What will I leave behind?</h1>
       <p style={{ fontFamily: SANS, fontSize: 13.5, color: T.muted, margin: "0 0 18px", lineHeight: 1.6 }}>
-        The things you want to live for — and be remembered by.
+        What am I building today to be remembered for…
       </p>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
