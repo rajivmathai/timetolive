@@ -139,6 +139,7 @@ function Ambience() {
 function GlobalStyles() {
   const css = `
 :root { color-scheme: dark; }
+.ttl-root { height: 100vh; height: 100dvh; }
 @keyframes ttlFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .ttl-fade { animation: ttlFade 0.6s ease both; }
 .ttl-topbar, .ttl-bottomnav { display: none; }
@@ -317,12 +318,12 @@ function SettingsPage({ config, setConfig, session, syncStatus, onOpenAuth, onSi
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={{ ...inputStyle, marginTop: 6, marginBottom: 20 }} />
 
         <div style={label}>Current age</div>
-        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: T.accent }} />
-        <div style={{ textAlign: "center", marginBottom: 18, fontFamily: SERIF, fontSize: 18, color: T.accentLight }}>{currentAge}</div>
+        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{currentAge}</div>
+        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 18, accentColor: T.accent }} />
 
         <div style={label}>A life of</div>
-        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: T.accent }} />
-        <div style={{ textAlign: "center", marginBottom: 22, fontFamily: SERIF, fontSize: 18, color: T.accentLight }}>{targetAge} years</div>
+        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{targetAge} years</div>
+        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 4, accentColor: T.accent }} />
 
         <button onClick={() => setConfig({ ...config, name: name.trim(), currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>Save</button>
       </div>
@@ -362,7 +363,7 @@ const NAV = [
 
 function Sidebar({ page, setPage, session, syncStatus, onAccount }) {
   return (
-    <div className="ttl-sidebar" style={{ width: 220, minHeight: "100vh", background: "rgba(10,10,12,0.6)", borderRight: `1px solid ${T.cardBorder}`, display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0, position: "relative", zIndex: 4 }}>
+    <div className="ttl-sidebar" style={{ width: 220, height: "100%", background: "rgba(10,10,12,0.6)", borderRight: `1px solid ${T.cardBorder}`, display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0, position: "relative", zIndex: 4 }}>
       <div style={{ padding: "8px 20px 22px", display: "flex", alignItems: "center", gap: 9 }}>
         <HourMark size={24} /><BrandTitle size={20} />
       </div>
@@ -393,7 +394,7 @@ function Sidebar({ page, setPage, session, syncStatus, onAccount }) {
 
 function MobileTopBar({ session, syncStatus, onAccount, setPage }) {
   return (
-    <div className="ttl-topbar" style={{ position: "sticky", top: 0, zIndex: 40, alignItems: "center", justifyContent: "space-between", padding: "11px 16px", background: "rgba(10,10,12,0.9)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.cardBorder}` }}>
+    <div className="ttl-topbar" style={{ position: "sticky", top: 0, zIndex: 40, alignItems: "center", justifyContent: "space-between", padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top))", background: "rgba(10,10,12,0.9)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.cardBorder}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}><HourMark size={22} /><BrandTitle size={18} /></div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <SyncBadge session={session} syncStatus={syncStatus} onClick={onAccount} compact />
@@ -518,7 +519,7 @@ function Onboarding({ onComplete, onOpenAuth, session }) {
 
   if (step === 0) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}` }}>
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}` }}>
         <HourMark size={56} />
         <div style={{ marginTop: 18 }}><BrandTitle size={38} /></div>
         <p style={{ fontFamily: SERIF, fontStyle: "italic", color: T.accentLight, fontSize: 18, marginTop: 12 }}>{CLOSING_QUOTE}</p>
@@ -532,18 +533,18 @@ function Onboarding({ onComplete, onOpenAuth, session }) {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}` }}>
+    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}` }}>
       <h2 style={{ fontFamily: SERIF, fontWeight: 500, color: T.text, fontSize: 26, marginBottom: 4 }}>A little about you</h2>
       <p style={{ fontFamily: SANS, color: T.muted, fontSize: 13, marginBottom: 26 }}>This shapes your life in weeks.</p>
       <div style={{ ...card, background: T.bgAlt, padding: 28, width: 360, maxWidth: "90vw" }}>
         <div style={label}>Your name</div>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={{ ...inputStyle, marginTop: 6, marginBottom: 20 }} />
         <div style={label}>Current age</div>
-        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: T.accent }} />
-        <div style={{ textAlign: "center", marginBottom: 16, fontFamily: SERIF, fontSize: 18, color: T.accentLight }}>{currentAge}</div>
+        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{currentAge}</div>
+        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 14, accentColor: T.accent }} />
         <div style={label}>A life of</div>
-        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: T.accent }} />
-        <div style={{ textAlign: "center", marginBottom: 22, fontFamily: SERIF, fontSize: 18, color: T.accentLight }}>{targetAge} years</div>
+        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{targetAge} years</div>
+        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 4, accentColor: T.accent }} />
         <button onClick={() => onComplete({ name: name.trim(), currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>See my weeks</button>
       </div>
     </div>
@@ -660,12 +661,12 @@ export default function TimeToLive() {
   };
 
   return (
-    <div style={{ fontFamily: SANS, minHeight: "100vh", background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}`, display: "flex", position: "relative" }}>
+    <div className="ttl-root" style={{ fontFamily: SANS, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}`, display: "flex", position: "relative" }}>
       <GlobalStyles />
       <Ambience />
       {authModalEl}
       <Sidebar page={page} setPage={setPage} session={session} syncStatus={syncStatus} onAccount={openAccount} />
-      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", minHeight: "100vh", display: "flex", flexDirection: "column", position: "relative", zIndex: 2 }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column", position: "relative", zIndex: 2 }}>
         <MobileTopBar session={session} syncStatus={syncStatus} onAccount={openAccount} setPage={setPage} />
         <div className="ttl-page" style={{ flex: 1 }}>{renderPage()}</div>
       </div>
