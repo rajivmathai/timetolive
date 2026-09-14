@@ -43,6 +43,42 @@ function dayOfYear(d = new Date()) {
   const start = new Date(d.getFullYear(), 0, 0);
   return Math.floor((d - start) / 86400000);
 }
+function relAgo(ts) {
+  if (!ts) return "";
+  const d = (Date.now() - ts) / 86400000;
+  if (d < 1) return "today";
+  if (d < 7) return `${Math.floor(d)}d ago`;
+  if (d < 30) return `${Math.max(1, Math.floor(d / 7))}w ago`;
+  if (d < 365) return `${Math.max(1, Math.floor(d / 30))}mo ago`;
+  return `${Math.max(1, Math.floor(d / 365))}y ago`;
+}
+// Highlight reel: nearest reflection to ~a week / month / year ago, plus the first entry.
+function buildReel(reflections) {
+  if (!reflections || !reflections.length) return [];
+  const now = Date.now(), DAY = 86400000;
+  const markers = [
+    { key: "year", label: "A year ago", days: 365 },
+    { key: "month", label: "A month ago", days: 30 },
+    { key: "week", label: "A week ago", days: 7 },
+  ];
+  const used = new Set();
+  const cards = [];
+  for (const m of markers) {
+    const target = now - m.days * DAY;
+    let best = null, bestDiff = Infinity;
+    for (const r of reflections) {
+      if (used.has(r.id)) continue;
+      const t = new Date(r.date).getTime();
+      if ((now - t) / DAY < m.days * 0.5) continue; // too recent to count for this marker
+      const diff = Math.abs(t - target);
+      if (diff < bestDiff) { bestDiff = diff; best = r; }
+    }
+    if (best) { used.add(best.id); cards.push({ ...best, marker: m.label, rank: m.days }); }
+  }
+  const oldest = [...reflections].sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+  if (oldest && !used.has(oldest.id)) cards.push({ ...oldest, marker: "Your first entry", rank: Infinity });
+  return cards.sort((a, b) => a.rank - b.rank);
+}
 
 const REFLECT_PROMPTS = [
   "What are you grateful for today?",
@@ -50,7 +86,7 @@ const REFLECT_PROMPTS = [
   "What do you want to remember about this moment?",
   "Who are you thankful for right now?",
   "What felt meaningful today?",
-  "What would make tomorrow feel well-lived?",
+  "What made today feel well-lived?",
   "What small thing brought you joy?",
 ];
 const CLOSING_QUOTE = "Life is to be lived.";
@@ -129,11 +165,10 @@ function weeksSVG(targetAge, livedWeeks) {
     for (let c = 0; c < COLS; c++) {
       const idx = y * COLS + c, x = c * pitch, yy = y * pitch;
       if (idx < livedWeeks) r += `<rect x="${x}" y="${yy}" width="${cell}" height="${cell}" rx="1.6" fill="#E8E8EC" fill-opacity="0.9"/>`;
-      else if (idx === livedWeeks) r += `<rect x="${x}" y="${yy}" width="${cell}" height="${cell}" rx="1.6" fill="#E4C878"/>`;
       else r += `<rect x="${x}" y="${yy}" width="${cell}" height="${cell}" rx="1.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="0.9"/>`;
     }
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="height:auto;display:block" xmlns="http://www.w3.org/2000/svg">${r}</svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block" xmlns="http://www.w3.org/2000/svg">${r}</svg>`;
 }
 
 function WeeksPage({ config }) {
@@ -146,30 +181,21 @@ function WeeksPage({ config }) {
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
   return (
-    <div className="ttl-fade" style={{ padding: "26px 24px 40px", maxWidth: 760, margin: "0 auto" }}>
-      <div style={{ textAlign: "center", marginBottom: 22 }}>
-        <div style={{ fontFamily: SERIF, fontSize: 25, fontWeight: 500, color: T.text, letterSpacing: "2px", textTransform: "uppercase" }}>
+    <div className="ttl-fade" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, padding: "20px 20px 10px", maxWidth: 760, margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ textAlign: "center", marginBottom: 14, flexShrink: 0 }}>
+        <div style={{ fontFamily: SERIF, fontSize: 23, fontWeight: 500, color: T.text, letterSpacing: "2px", textTransform: "uppercase" }}>
           {who} Life in Weeks
         </div>
-        <div style={{ fontFamily: SANS, fontSize: 12.5, color: T.muted, marginTop: 6, letterSpacing: "0.3px" }}>{today}</div>
-        <div style={{ fontFamily: SANS, fontSize: 11.5, color: T.dim, marginTop: 10, letterSpacing: "0.4px" }}>
-          <span style={{ color: T.accentLight, fontWeight: 600 }}>{livedWeeks.toLocaleString()}</span> weeks lived
+        <div style={{ fontFamily: SANS, fontSize: 12, color: T.muted, marginTop: 6, letterSpacing: "0.3px" }}>{today}</div>
+        <div style={{ fontFamily: SANS, fontSize: 11.5, color: T.dim, marginTop: 8, letterSpacing: "0.4px" }}>
+          <span style={{ color: T.text, fontWeight: 600 }}>{livedWeeks.toLocaleString()}</span> weeks lived
           <span style={{ margin: "0 8px", opacity: 0.5 }}>·</span>
-          <span style={{ color: T.text, fontWeight: 600 }}>{remaining.toLocaleString()}</span> ahead
+          <span style={{ color: T.accentLight, fontWeight: 600 }}>{remaining.toLocaleString()}</span> ahead
         </div>
       </div>
 
-      <div dangerouslySetInnerHTML={{ __html: weeksSVG(targetAge, livedWeeks) }} />
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 18, marginTop: 18, fontSize: 10.5, color: T.dim, fontFamily: SANS }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: "#E8E8EC", opacity: 0.9 }} /> Lived</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: T.accentLight }} /> This week</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, border: "1px solid rgba(255,255,255,0.3)" }} /> Ahead</span>
-      </div>
-
-      <div style={{ textAlign: "center", marginTop: 34, paddingTop: 26, borderTop: `1px solid ${T.cardBorder}` }}>
-        <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 22, color: T.accentLight, margin: 0, letterSpacing: "0.3px" }}>{CLOSING_QUOTE}</p>
-      </div>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+        dangerouslySetInnerHTML={{ __html: weeksSVG(targetAge, livedWeeks) }} />
     </div>
   );
 }
@@ -178,6 +204,7 @@ function WeeksPage({ config }) {
 function ReflectPage({ reflections, setReflections }) {
   const prompt = REFLECT_PROMPTS[dayOfYear() % REFLECT_PROMPTS.length];
   const [text, setText] = useState("");
+  const reel = buildReel(reflections);
 
   const save = () => {
     if (!text.trim()) return;
@@ -186,19 +213,34 @@ function ReflectPage({ reflections, setReflections }) {
   };
 
   return (
-    <div className="ttl-fade" style={{ padding: "26px 24px 40px", maxWidth: 620, margin: "0 auto" }}>
+    <div className="ttl-fade" style={{ padding: "18px 20px 40px", maxWidth: 620, margin: "0 auto" }}>
       <div style={label}>Today's reflection</div>
-      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 27, color: T.text, margin: "10px 0 18px", lineHeight: 1.25 }}>{prompt}</h1>
+      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 25, color: T.text, margin: "8px 0 14px", lineHeight: 1.25 }}>{prompt}</h1>
 
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Take a quiet moment…"
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="Take a quiet moment…"
         style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6, fontSize: 16 }} />
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
         <button onClick={save} style={{ ...btn, padding: "10px 26px", opacity: text.trim() ? 1 : 0.5 }}>Save</button>
       </div>
 
+      {reel.length > 0 && (
+        <div style={{ marginTop: 26 }}>
+          <div style={{ ...label, color: T.dim, marginBottom: 12 }}>Looking back</div>
+          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 6, margin: "0 -20px", padding: "0 20px 6px", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
+            {reel.map((r) => (
+              <div key={r.id} style={{ ...card, padding: 15, minWidth: 220, maxWidth: 220, flexShrink: 0, scrollSnapAlign: "start" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1.2, fontFamily: SANS }}>{r.marker}</div>
+                <div style={{ fontSize: 10.5, color: T.dim, fontFamily: SANS, margin: "5px 0 8px" }}>{fmtDate(r.date)}</div>
+                <div style={{ fontFamily: SERIF, fontSize: 15.5, color: T.text, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.text}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {reflections.length > 0 && (
-        <div style={{ marginTop: 34 }}>
-          <div style={{ ...label, color: T.dim, marginBottom: 14 }}>Looking back</div>
+        <div style={{ marginTop: 28 }}>
+          <div style={{ ...label, color: T.dim, marginBottom: 12 }}>All reflections</div>
           {reflections.map((r) => (
             <div key={r.id} style={{ ...card, padding: 16, marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: T.dim, fontFamily: SANS, marginBottom: 6, letterSpacing: "0.3px" }}>{fmtDate(r.date)}{r.prompt ? ` · ${r.prompt}` : ""}</div>
@@ -219,35 +261,38 @@ function IntentionsPage({ intentions, setIntentions }) {
   const submit = () => {
     if (!text.trim()) return;
     if (editId) { setIntentions(intentions.map((i) => (i.id === editId ? { ...i, text: text.trim() } : i))); setEditId(null); }
-    else setIntentions([...intentions, { id: Date.now().toString(), text: text.trim() }]);
+    else setIntentions([...intentions, { id: Date.now().toString(), text: text.trim(), createdAt: Date.now() }]);
     setText("");
   };
   const edit = (i) => { setEditId(i.id); setText(i.text); };
   const remove = (id) => { setIntentions(intentions.filter((i) => i.id !== id)); if (editId === id) { setEditId(null); setText(""); } };
 
   return (
-    <div className="ttl-fade" style={{ padding: "26px 24px 40px", maxWidth: 620, margin: "0 auto" }}>
-      <div style={label}>Intentions</div>
-      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 27, color: T.text, margin: "10px 0 6px" }}>What is this chapter for?</h1>
-      <p style={{ fontFamily: SANS, fontSize: 13.5, color: T.muted, margin: "0 0 22px", lineHeight: 1.6 }}>
-        A few things you want to live toward — not tasks, just direction.
+    <div className="ttl-fade" style={{ padding: "18px 20px 40px", maxWidth: 620, margin: "0 auto" }}>
+      <div style={label}>Legacy</div>
+      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 25, color: T.text, margin: "8px 0 6px" }}>What will you leave behind?</h1>
+      <p style={{ fontFamily: SANS, fontSize: 13.5, color: T.muted, margin: "0 0 18px", lineHeight: 1.6 }}>
+        The things you want to live for — and be remembered by.
       </p>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
         <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="e.g. Be present with the people I love" style={inputStyle} />
+          placeholder="e.g. Raise children who are kind and brave" style={inputStyle} />
         <button onClick={submit} style={{ ...btn, padding: "0 20px", flexShrink: 0, opacity: text.trim() ? 1 : 0.5 }}>{editId ? "Update" : "Add"}</button>
       </div>
 
       {intentions.length === 0 ? (
         <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 17, color: T.dim, textAlign: "center", marginTop: 30 }}>
-          Nothing yet. Name what matters.
+          Nothing yet. Name what you'll leave.
         </p>
       ) : (
         intentions.map((i) => (
-          <div key={i.id} style={{ ...card, padding: "15px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 12 }}>
+          <div key={i.id} style={{ ...card, padding: "14px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.accent, flexShrink: 0 }} />
-            <div style={{ flex: 1, fontFamily: SERIF, fontSize: 18, color: T.text, lineHeight: 1.4 }}>{i.text}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: SERIF, fontSize: 18, color: T.text, lineHeight: 1.4 }}>{i.text}</div>
+              {i.createdAt && <div style={{ fontFamily: SANS, fontSize: 10.5, color: T.dim, marginTop: 3, letterSpacing: "0.3px" }}>Set {relAgo(i.createdAt)}</div>}
+            </div>
             <button onClick={() => edit(i)} title="Edit" style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, padding: 4 }}>{"\u270E"}</button>
             <button onClick={() => remove(i.id)} title="Remove" style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontSize: 14, padding: 4 }}>{"\u2715"}</button>
           </div>
@@ -312,7 +357,7 @@ function SettingsPage({ config, setConfig, session, syncStatus, onOpenAuth, onSi
 const NAV = [
   { id: "weeks", label: "Weeks", Icon: IconWeeks },
   { id: "reflect", label: "Reflect", Icon: IconReflect },
-  { id: "intentions", label: "Intentions", Icon: IconIntentions },
+  { id: "intentions", label: "Legacy", Icon: IconIntentions },
 ];
 
 function Sidebar({ page, setPage, session, syncStatus, onAccount }) {
