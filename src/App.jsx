@@ -140,6 +140,7 @@ function GlobalStyles() {
   const css = `
 :root { color-scheme: dark; }
 .ttl-root { height: 100vh; height: 100dvh; }
+.ttl-weeks { display: block; width: 100%; height: calc(100vh - 160px); height: calc(100dvh - 160px); }
 @keyframes ttlFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .ttl-fade { animation: ttlFade 0.6s ease both; }
 .ttl-topbar, .ttl-bottomnav { display: none; }
@@ -148,6 +149,8 @@ function GlobalStyles() {
   .ttl-topbar { display: flex !important; }
   .ttl-bottomnav { display: flex !important; }
   .ttl-page > div { padding: 18px 18px calc(96px + env(safe-area-inset-bottom)) !important; max-width: 100% !important; margin: 0 !important; }
+  .ttl-page > div.ttl-weekspage { padding: 14px 16px 6px !important; }
+  .ttl-weeks { height: calc(100dvh - 208px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) { .ttl-fade { animation: none; } }
 textarea, input { font-family: ${SANS}; }
@@ -182,8 +185,8 @@ function WeeksPage({ config }) {
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
   return (
-    <div className="ttl-fade" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, padding: "20px 20px 10px", maxWidth: 760, margin: "0 auto", boxSizing: "border-box" }}>
-      <div style={{ textAlign: "center", marginBottom: 14, flexShrink: 0 }}>
+    <div className="ttl-fade ttl-weekspage" style={{ maxWidth: 760, margin: "0 auto", padding: "18px 20px 10px" }}>
+      <div style={{ textAlign: "center", marginBottom: 12 }}>
         <div style={{ fontFamily: SERIF, fontSize: 23, fontWeight: 500, color: T.text, letterSpacing: "2px", textTransform: "uppercase" }}>
           {who} Life in Weeks
         </div>
@@ -195,8 +198,7 @@ function WeeksPage({ config }) {
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-        dangerouslySetInnerHTML={{ __html: weeksSVG(targetAge, livedWeeks) }} />
+      <div className="ttl-weeks" dangerouslySetInnerHTML={{ __html: weeksSVG(targetAge, livedWeeks) }} />
     </div>
   );
 }
