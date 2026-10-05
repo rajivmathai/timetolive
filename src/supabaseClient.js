@@ -21,4 +21,5 @@ export const supabase = looksConfigured
 export const isSyncConfigured = !!supabase;
 
 // One row per user holds the whole app state as JSON.
-export const STATE_TABLE = "app_state";
+// Classic edition saves to its OWN table so it never touches the new app's data.
+export const STATE_TABLE = "app_state_classic";

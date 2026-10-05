@@ -10,5 +10,5 @@
 // so it is safe to deploy before filling these in.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SUPABASE_URL = "https://YOUR-PROJECT-ID.supabase.co";
-export const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+export const SUPABASE_URL = "https://sedyquxpprpblfbqixdt.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlZHlxdXhwcHJwYmxmYnFpeGR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3ODA1NzgsImV4cCI6MjA5ODM1NjU3OH0.F6t70oTLZan5joiFOi33qx7LbmaOWU-vjYNkxcaip0U";

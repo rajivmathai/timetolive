@@ -1,427 +1,1383 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { supabase, isSyncConfigured, STATE_TABLE } from "./supabaseClient";
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Time to Live — a contemplative "life in weeks" companion
-// Three surfaces: Weeks (contemplate) · Reflect (gratitude) · Intentions (direction)
+// TimeToLive — Life Planning Timeline
+// Full dark contemplative theme, life balance scoring, near-term planner,
+// retrospective prompts, retroactive events, emotional onboarding, AI life coach
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── Theme (black tuxedo) ─────────────────────────────────────────────────────
+// ─── Theme ───────────────────────────────────────────────────────────────────
+
 const T = {
-  bg: "#0A0A0C",
-  bgAlt: "#141418",
-  card: "rgba(255,255,255,0.045)",
-  cardBorder: "rgba(255,255,255,0.09)",
-  text: "#F4F4F6",
-  muted: "#A6A6AE",
-  dim: "#61616B",
-  accent: "#C9A24B",
-  accentLight: "#E4C878",
-  crimson: "#C0424A",
-  gradient: "linear-gradient(135deg, #FFFFFF, #D6D6DC)",
-  gradientSoft: "linear-gradient(160deg, #0C0C0F 0%, #100F13 45%, #08080A 100%)",
+  bg: "#13111C",
+  bgAlt: "#1A1726",
+  card: "rgba(255,255,255,0.04)",
+  cardBorder: "rgba(255,255,255,0.07)",
+  cardHover: "rgba(255,255,255,0.07)",
+  text: "#E8E0F0",
+  muted: "#9B8FBB",
+  dim: "#5E5480",
+  accent: "#7C3AED",
+  accentLight: "#A78BFA",
+  pink: "#EC4899",
+  orange: "#F59E0B",
+  gradient: "linear-gradient(135deg, #7C3AED, #EC4899)",
+  gradientSoft: "linear-gradient(160deg, #13111C 0%, #1E1535 40%, #1A1726 100%)",
   inputBg: "rgba(255,255,255,0.05)",
-  inputBorder: "rgba(255,255,255,0.12)",
+  inputBorder: "rgba(255,255,255,0.1)",
 };
 
-const SERIF = "'EB Garamond', Georgia, 'Times New Roman', serif";
-const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif';
+const card = {
+  background: T.card, borderRadius: 16,
+  border: `1px solid ${T.cardBorder}`,
+  backdropFilter: "blur(12px)",
+};
 
-const card = { background: T.card, borderRadius: 16, border: `1px solid ${T.cardBorder}` };
-const btn = { background: T.gradient, color: "#0A0A0C", border: "none", borderRadius: 12, padding: "12px 24px", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: SANS };
-const btnOutline = { background: "rgba(255,255,255,0.05)", color: T.text, borderRadius: 12, border: `1px solid ${T.cardBorder}`, padding: "10px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: SANS };
-const inputStyle = { width: "100%", padding: "11px 14px", borderRadius: 10, border: `1px solid ${T.inputBorder}`, background: T.inputBg, color: T.text, fontSize: 15, boxSizing: "border-box", outline: "none", fontFamily: SANS };
-const label = { fontSize: 10.5, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1.5, fontFamily: SANS };
+const btn = {
+  background: T.gradient, color: "#FFF", border: "none", borderRadius: 12,
+  padding: "12px 24px", fontSize: 15, fontWeight: 600, cursor: "pointer",
+};
 
-// ─── Small helpers ────────────────────────────────────────────────────────────
-function readJSON(key) { try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch { return null; } }
-function fmtDate(iso) {
-  try { return new Date(iso).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" }); }
-  catch { return ""; }
-}
-function dayOfYear(d = new Date()) {
-  const start = new Date(d.getFullYear(), 0, 0);
-  return Math.floor((d - start) / 86400000);
-}
-function relAgo(ts) {
-  if (!ts) return "";
-  const d = (Date.now() - ts) / 86400000;
-  if (d < 1) return "today";
-  if (d < 7) return `${Math.floor(d)}d ago`;
-  if (d < 30) return `${Math.max(1, Math.floor(d / 7))}w ago`;
-  if (d < 365) return `${Math.max(1, Math.floor(d / 30))}mo ago`;
-  return `${Math.max(1, Math.floor(d / 365))}y ago`;
-}
-// Highlight reel: nearest reflection to ~a week / month / year ago, plus the first entry.
-function buildReel(reflections) {
-  if (!reflections || !reflections.length) return [];
-  const now = Date.now(), DAY = 86400000;
-  const markers = [
-    { key: "year", label: "A year ago", days: 365 },
-    { key: "month", label: "A month ago", days: 30 },
-    { key: "week", label: "A week ago", days: 7 },
-  ];
-  const used = new Set();
-  const cards = [];
-  for (const m of markers) {
-    const target = now - m.days * DAY;
-    let best = null, bestDiff = Infinity;
-    for (const r of reflections) {
-      if (used.has(r.id)) continue;
-      const t = new Date(r.date).getTime();
-      if ((now - t) / DAY < m.days * 0.5) continue; // too recent to count for this marker
-      const diff = Math.abs(t - target);
-      if (diff < bestDiff) { bestDiff = diff; best = r; }
-    }
-    if (best) { used.add(best.id); cards.push({ ...best, marker: m.label, rank: m.days }); }
-  }
-  const oldest = [...reflections].sort((a, b) => new Date(a.date) - new Date(b.date))[0];
-  if (oldest && !used.has(oldest.id)) cards.push({ ...oldest, marker: "Your first entry", rank: Infinity });
-  return cards.sort((a, b) => a.rank - b.rank);
-}
+const btnOutline = {
+  background: "rgba(255,255,255,0.06)", color: T.text, borderRadius: 12,
+  border: `1px solid ${T.cardBorder}`, padding: "10px 20px",
+  fontSize: 14, fontWeight: 600, cursor: "pointer",
+};
 
-const REFLECT_PROMPTS = [
-  "What are you grateful for today?",
-  "What mattered most this week?",
-  "What do you want to remember about this moment?",
-  "Who are you thankful for right now?",
-  "What felt meaningful today?",
-  "What made today feel well-lived?",
-  "What small thing brought you joy?",
+const inputStyle = {
+  width: "100%", padding: "10px 14px", borderRadius: 10,
+  border: `1px solid ${T.inputBorder}`, background: T.inputBg,
+  color: T.text, fontSize: 14, boxSizing: "border-box", outline: "none",
+  fontFamily: "inherit",
+};
+
+// ─── Categories (audited for contrast on dark bg) ────────────────────────────
+
+const CATEGORIES = [
+  { key: "career", label: "Career", color: "#3B82F6" },
+  { key: "family", label: "Family", color: "#22C55E" },
+  { key: "health", label: "Health", color: "#EF4444" },
+  { key: "travel", label: "Travel", color: "#F59E0B" },
+  { key: "education", label: "Education", color: "#A78BFA" },
+  { key: "relationships", label: "Relationships", color: "#EC4899" },
+  { key: "finance", label: "Finance", color: "#06B6D4" },
+  { key: "hobbies", label: "Hobbies", color: "#F97316" },
 ];
-const CLOSING_QUOTE = "Life is to be lived.";
 
-// ─── Brand + line icons ───────────────────────────────────────────────────────
-function HourMark({ size = 24 }) {
+const CAT_MAP = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
+
+const MONTH_COLS = ["J","F","M","A","M","J","J","A","S","O","N","D"];
+const MONTH_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+// ─── Life event presets for retroactive import ───────────────────────────────
+
+const LIFE_PRESETS = [
+  { title: "Born", category: "family", icon: "\u{1F476}" },
+  { title: "Started school", category: "education", icon: "\u{1F393}" },
+  { title: "Graduated", category: "education", icon: "\u{1F4DC}" },
+  { title: "First job", category: "career", icon: "\u{1F4BC}" },
+  { title: "Got married", category: "relationships", icon: "\u{1F48D}" },
+  { title: "Had a child", category: "family", icon: "\u{1F476}" },
+  { title: "Moved cities", category: "travel", icon: "\u{1F3E0}" },
+  { title: "Career change", category: "career", icon: "\u{1F504}" },
+  { title: "Major trip", category: "travel", icon: "\u2708\uFE0F" },
+  { title: "Health milestone", category: "health", icon: "\u{1F3CB}" },
+  { title: "Started a business", category: "career", icon: "\u{1F680}" },
+  { title: "Bought a home", category: "finance", icon: "\u{1F3E1}" },
+];
+
+// ─── Coach prompts ───────────────────────────────────────────────────────────
+
+const COACH_PROMPTS = [
+  "What does a meaningful week look like for you right now?",
+  "Help me plan my next quarter with intention",
+  "I want to spend more time with family — suggest a plan",
+  "What life events should I be thinking about for my age?",
+  "I feel stuck in my career. Help me think through next steps",
+  "Create a reflection about what I'm grateful for",
+  "Review my life balance and suggest adjustments",
+];
+
+const RETROSPECTIVE_PROMPTS = [
+  { trigger: "quarterly", text: "It's been 3 months. Which category got the most attention? Which got neglected?" },
+  { trigger: "imbalance", text: (cat) => `Your ${cat} category hasn't had an event in over 6 months. Is that intentional?` },
+  { trigger: "milestone", text: "You're approaching a new decade. What do you want it to look like?" },
+];
+
+// ─── SVG Hourglass & Brand ───────────────────────────────────────────────────
+
+function HourglassIcon({ size = 28 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#C9A24B" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M7 3H17M7 21H17M8 3.5C8 8 12 10 12 12C12 14 8 16 8 20.5M16 3.5C16 8 12 10 12 12C12 14 16 16 16 20.5" />
-      <path d="M9.5 18.5C10 16.5 14 16.5 14.5 18.5" stroke="#E4C878" opacity="0.9" />
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
+      <defs>
+        <linearGradient id="hg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#9B59B6" />
+          <stop offset="50%" stopColor="#EC4899" />
+          <stop offset="100%" stopColor="#F59E0B" />
+        </linearGradient>
+        <linearGradient id="snd" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#F59E0B" />
+          <stop offset="100%" stopColor="#EC4899" />
+        </linearGradient>
+      </defs>
+      <rect x="14" y="4" width="36" height="5" rx="2.5" fill="url(#hg)" />
+      <rect x="14" y="55" width="36" height="5" rx="2.5" fill="url(#hg)" />
+      <path d="M18 9C18 9,18 26,32 32C46 26,46 9,46 9" stroke="url(#hg)" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      <path d="M18 55C18 55,18 38,32 32C46 38,46 55,46 55" stroke="url(#hg)" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      <path d="M22 12C22 12,22 22,32 27C42 22,42 12,42 12Z" fill="url(#snd)" opacity="0.3" />
+      <path d="M24 52C24 52,24 42,32 37C40 42,40 52,40 52Z" fill="url(#snd)" opacity="0.6" />
+      <line x1="32" y1="28" x2="32" y2="36" stroke="#F59E0B" strokeWidth="1.5" opacity="0.7" />
+      <circle cx="10" cy="20" r="2.5" fill="#22C55E" opacity="0.8" />
+      <circle cx="8" cy="32" r="2" fill="#3B82F6" opacity="0.8" />
+      <circle cx="10" cy="44" r="2.5" fill="#A78BFA" opacity="0.8" />
+      <circle cx="54" cy="18" r="2" fill="#EC4899" opacity="0.8" />
+      <circle cx="56" cy="30" r="2.5" fill="#F59E0B" opacity="0.8" />
+      <circle cx="54" cy="42" r="2" fill="#22C55E" opacity="0.8" />
     </svg>
   );
 }
-function BrandTitle({ size = 22 }) {
+
+function BrandTitle({ size = 20 }) {
   return (
-    <span style={{ fontFamily: SERIF, fontSize: size, fontWeight: 500, letterSpacing: "0.4px", color: T.text }}>
-      Time to <span style={{ color: T.accentLight }}>Live</span>
+    <span style={{ fontSize: size, fontWeight: 800, letterSpacing: "-0.3px" }}>
+      <span style={{ background: "linear-gradient(135deg, #EC4899, #A78BFA)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>TimeTo</span>
+      <span style={{ background: "linear-gradient(135deg, #F59E0B, #F97316)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Live</span>
+      <span style={{ marginLeft: 6, fontSize: Math.max(9, Math.round(size * 0.45)), fontWeight: 700, letterSpacing: "0.5px", color: "#A78BFA", border: "1px solid rgba(167,139,250,0.5)", borderRadius: 6, padding: "1px 5px", verticalAlign: "middle", WebkitTextFillColor: "#A78BFA" }}>Classic</span>
     </span>
   );
 }
-const strokeIcon = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" };
-function IconWeeks({ size = 20 }) {
-  return (<svg width={size} height={size} viewBox="0 0 24 24" {...strokeIcon}>
-    <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.6" />
-    <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.6" />
-  </svg>);
-}
-function IconReflect({ size = 20 }) {
-  return (<svg width={size} height={size} viewBox="0 0 24 24" {...strokeIcon}>
-    <path d="M5 21C5 12.5 11.5 5.5 20 4.5C20 13 13.5 20 5 21Z" /><path d="M6 20C10 16 13.5 12.5 17 9" />
-  </svg>);
-}
-function IconIntentions({ size = 20 }) {
-  return (<svg width={size} height={size} viewBox="0 0 24 24" {...strokeIcon}>
-    <circle cx="12" cy="12" r="8.5" /><path d="M15.5 8.5L10.8 10.8L8.5 15.5L13.2 13.2Z" />
-  </svg>);
-}
-function IconSettings({ size = 20 }) {
-  return (<svg width={size} height={size} viewBox="0 0 24 24" {...strokeIcon}>
-    <line x1="4" y1="8" x2="20" y2="8" /><circle cx="9" cy="8" r="2.3" fill={T.bg} />
-    <line x1="4" y1="16" x2="20" y2="16" /><circle cx="15" cy="16" r="2.3" fill={T.bg} />
-  </svg>);
-}
 
-// ─── Ambience: grain + vignette + motion ──────────────────────────────────────
-function Ambience() {
-  const noise = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E";
-  return <div aria-hidden style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 3, opacity: 0.03, backgroundImage: `url("${noise}")` }} />;
-}
-function GlobalStyles() {
-  const css = `
-:root { color-scheme: dark; }
-.ttl-root { height: 100vh; height: 100dvh; }
-.ttl-weeks { display: block; width: 100%; height: calc(100vh - 160px); height: calc(100dvh - 160px); }
-@keyframes ttlFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.ttl-fade { animation: ttlFade 0.6s ease both; }
-.ttl-topbar, .ttl-bottomnav { display: none; }
-@media (max-width: 768px) {
-  .ttl-sidebar { display: none !important; }
-  .ttl-topbar { display: flex !important; }
-  .ttl-bottomnav { display: flex !important; }
-  .ttl-page > div { padding: 18px 18px calc(96px + env(safe-area-inset-bottom)) !important; max-width: 100% !important; margin: 0 !important; }
-  .ttl-page > div.ttl-weekspage { padding: 14px 16px 6px !important; }
-  .ttl-weeks { height: calc(100dvh - 208px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
-}
-@media (prefers-reduced-motion: reduce) { .ttl-fade { animation: none; } }
-textarea, input { font-family: ${SANS}; }
-::placeholder { color: ${T.dim}; }
-`;
-  return <style dangerouslySetInnerHTML={{ __html: css }} />;
-}
+// ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-// ─── Life in Weeks grid (SVG) ─────────────────────────────────────────────────
-function weeksSVG(targetAge, livedWeeks) {
-  const COLS = 52, cell = 8, gap = 2, pitch = cell + gap;
-  const rows = Math.max(1, targetAge);
-  const w = COLS * pitch - gap, h = rows * pitch - gap;
-  let r = "";
-  for (let y = 0; y < rows; y++) {
-    for (let c = 0; c < COLS; c++) {
-      const idx = y * COLS + c, x = c * pitch, yy = y * pitch;
-      if (idx < livedWeeks) r += `<rect x="${x}" y="${yy}" width="${cell}" height="${cell}" rx="1.6" fill="#E8E8EC" fill-opacity="0.9"/>`;
-      else r += `<rect x="${x}" y="${yy}" width="${cell}" height="${cell}" rx="1.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="0.9"/>`;
-    }
-  }
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block" xmlns="http://www.w3.org/2000/svg">${r}</svg>`;
-}
-
-function WeeksPage({ config }) {
-  const targetAge = config.targetAge || 90;
-  const currentAge = config.currentAge || 0;
-  const totalWeeks = Math.round(targetAge * 52);
-  const livedWeeks = Math.min(totalWeeks, Math.round(currentAge * 52));
-  const remaining = Math.max(0, totalWeeks - livedWeeks);
-  const who = config.name ? `${config.name}'s` : "Your";
-  const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+function Sidebar({ page, setPage, currentAge, targetAge, monthsRemaining, session, syncStatus, onAccount }) {
+  const nav = [
+    { id: "dashboard", label: "Dashboard", icon: "\u{1F3E0}" },
+    { id: "planner", label: "This Month", icon: "\u{1F4CB}" },
+    { id: "timeline", label: "Timeline", icon: "\u{1F4C5}" },
+    { id: "balance", label: "Life Balance", icon: "\u{1F3AF}" },
+    { id: "reflections", label: "Reflections", icon: "\u{1F4D6}" },
+    { id: "milestones", label: "Milestones", icon: "\u{1F4C8}" },
+    { id: "coach", label: "Life Coach", icon: "\u{1F9ED}" },
+  ];
 
   return (
-    <div className="ttl-fade ttl-weekspage" style={{ maxWidth: 760, margin: "0 auto", padding: "18px 20px 10px" }}>
-      <div style={{ textAlign: "center", marginBottom: 12 }}>
-        <div style={{ fontFamily: SERIF, fontSize: 23, fontWeight: 500, color: T.text, letterSpacing: "2px", textTransform: "uppercase" }}>
-          {who} Life in Weeks
-        </div>
-        <div style={{ fontFamily: SANS, fontSize: 12, color: T.muted, marginTop: 6, letterSpacing: "0.3px" }}>{today}</div>
-        <div style={{ fontFamily: SANS, fontSize: 11.5, color: T.dim, marginTop: 8, letterSpacing: "0.4px" }}>
-          <span style={{ color: T.text, fontWeight: 600 }}>{livedWeeks.toLocaleString()}</span> weeks lived
-          <span style={{ margin: "0 8px", opacity: 0.5 }}>·</span>
-          <span style={{ color: T.accentLight, fontWeight: 600 }}>{remaining.toLocaleString()}</span> ahead
-        </div>
+    <div className="ttl-sidebar" style={{
+      width: 210, minHeight: "100vh", background: "rgba(19,17,28,0.8)",
+      borderRight: `1px solid ${T.cardBorder}`, display: "flex",
+      flexDirection: "column", padding: "16px 0", flexShrink: 0,
+      backdropFilter: "blur(10px)",
+    }}>
+      <div style={{ padding: "8px 16px 20px", display: "flex", alignItems: "center", gap: 8 }}>
+        <HourglassIcon size={26} />
+        <BrandTitle size={17} />
       </div>
 
-      <div className="ttl-weeks" dangerouslySetInnerHTML={{ __html: weeksSVG(targetAge, livedWeeks) }} />
-    </div>
-  );
-}
-
-// ─── Reflect (gratitude practice) ─────────────────────────────────────────────
-function ReflectPage({ reflections, setReflections }) {
-  const prompt = REFLECT_PROMPTS[dayOfYear() % REFLECT_PROMPTS.length];
-  const [text, setText] = useState("");
-  const reel = buildReel(reflections);
-
-  const save = () => {
-    if (!text.trim()) return;
-    setReflections([{ id: Date.now().toString(), date: new Date().toISOString(), prompt, text: text.trim() }, ...reflections]);
-    setText("");
-  };
-
-  return (
-    <div className="ttl-fade" style={{ padding: "18px 20px 40px", maxWidth: 620, margin: "0 auto" }}>
-      <div style={label}>Today's reflection</div>
-      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 25, color: T.text, margin: "8px 0 14px", lineHeight: 1.25 }}>{prompt}</h1>
-
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} placeholder="Take a quiet moment…"
-        style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6, fontSize: 16 }} />
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-        <button onClick={save} style={{ ...btn, padding: "10px 26px", opacity: text.trim() ? 1 : 0.5 }}>Save</button>
-      </div>
-
-      {reel.length > 0 && (
-        <div style={{ marginTop: 26 }}>
-          <div style={{ ...label, color: T.dim, marginBottom: 12 }}>Looking back</div>
-          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 6, margin: "0 -20px", padding: "0 20px 6px", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
-            {reel.map((r) => (
-              <div key={r.id} style={{ ...card, padding: 15, minWidth: 220, maxWidth: 220, flexShrink: 0, scrollSnapAlign: "start" }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1.2, fontFamily: SANS }}>{r.marker}</div>
-                <div style={{ fontSize: 10.5, color: T.dim, fontFamily: SANS, margin: "5px 0 8px" }}>{fmtDate(r.date)}</div>
-                <div style={{ fontFamily: SERIF, fontSize: 15.5, color: T.text, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.text}</div>
-              </div>
-            ))}
+      <div style={{ padding: "0 16px 16px", borderBottom: `1px solid ${T.cardBorder}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{
+            width: 34, height: 34, borderRadius: "50%", background: "rgba(124,58,237,0.25)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, fontWeight: 700, color: T.accentLight,
+          }}>RG</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.text }}>Age {currentAge}</div>
+            <div style={{ fontSize: 10, color: T.dim }}>Target: {targetAge}</div>
           </div>
         </div>
-      )}
-
-      {reflections.length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ ...label, color: T.dim, marginBottom: 12 }}>All reflections</div>
-          {reflections.map((r) => (
-            <div key={r.id} style={{ ...card, padding: 16, marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: T.dim, fontFamily: SANS, marginBottom: 6, letterSpacing: "0.3px" }}>{fmtDate(r.date)}{r.prompt ? ` · ${r.prompt}` : ""}</div>
-              <div style={{ fontFamily: SERIF, fontSize: 17, color: T.text, lineHeight: 1.55 }}>{r.text}</div>
-            </div>
-          ))}
+        <div style={{ fontSize: 11, color: T.muted }}>
+          <span style={{ fontWeight: 700, color: T.accentLight }}>{monthsRemaining}</span> months remaining
         </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Intentions (direction) ───────────────────────────────────────────────────
-function IntentionsPage({ intentions, setIntentions }) {
-  const [text, setText] = useState("");
-  const [editId, setEditId] = useState(null);
-
-  const submit = () => {
-    if (!text.trim()) return;
-    if (editId) { setIntentions(intentions.map((i) => (i.id === editId ? { ...i, text: text.trim() } : i))); setEditId(null); }
-    else setIntentions([...intentions, { id: Date.now().toString(), text: text.trim(), createdAt: Date.now() }]);
-    setText("");
-  };
-  const edit = (i) => { setEditId(i.id); setText(i.text); };
-  const remove = (id) => { setIntentions(intentions.filter((i) => i.id !== id)); if (editId === id) { setEditId(null); setText(""); } };
-
-  return (
-    <div className="ttl-fade" style={{ padding: "18px 20px 40px", maxWidth: 620, margin: "0 auto" }}>
-      <div style={label}>Legacy</div>
-      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 25, color: T.text, margin: "8px 0 6px" }}>What will I leave behind?</h1>
-      <p style={{ fontFamily: SANS, fontSize: 13.5, color: T.muted, margin: "0 0 18px", lineHeight: 1.6 }}>
-        What am I building today to be remembered for…
-      </p>
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="e.g. Raise children who are kind and brave" style={inputStyle} />
-        <button onClick={submit} style={{ ...btn, padding: "0 20px", flexShrink: 0, opacity: text.trim() ? 1 : 0.5 }}>{editId ? "Update" : "Add"}</button>
       </div>
 
-      {intentions.length === 0 ? (
-        <p style={{ fontFamily: SERIF, fontStyle: "italic", fontSize: 17, color: T.dim, textAlign: "center", marginTop: 30 }}>
-          Nothing yet. Name what you'll leave.
-        </p>
-      ) : (
-        intentions.map((i) => (
-          <div key={i.id} style={{ ...card, padding: "14px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.accent, flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: SERIF, fontSize: 18, color: T.text, lineHeight: 1.4 }}>{i.text}</div>
-              {i.createdAt && <div style={{ fontFamily: SANS, fontSize: 10.5, color: T.dim, marginTop: 3, letterSpacing: "0.3px" }}>Set {relAgo(i.createdAt)}</div>}
-            </div>
-            <button onClick={() => edit(i)} title="Edit" style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, padding: 4 }}>{"\u270E"}</button>
-            <button onClick={() => remove(i.id)} title="Remove" style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontSize: 14, padding: 4 }}>{"\u2715"}</button>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsPage({ config, setConfig, session, syncStatus, onOpenAuth, onSignOut, onReset }) {
-  const [name, setName] = useState(config.name || "");
-  const [currentAge, setCurrentAge] = useState(config.currentAge);
-  const [targetAge, setTargetAge] = useState(config.targetAge);
-
-  return (
-    <div className="ttl-fade" style={{ padding: "26px 24px 40px", maxWidth: 560, margin: "0 auto" }}>
-      <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 27, color: T.text, margin: "0 0 20px" }}>Settings</h1>
-
-      <div style={{ ...card, padding: 24 }}>
-        <div style={label}>Your name</div>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={{ ...inputStyle, marginTop: 6, marginBottom: 20 }} />
-
-        <div style={label}>Current age</div>
-        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{currentAge}</div>
-        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 18, accentColor: T.accent }} />
-
-        <div style={label}>A life of</div>
-        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{targetAge} years</div>
-        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 4, accentColor: T.accent }} />
-
-        <button onClick={() => setConfig({ ...config, name: name.trim(), currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>Save</button>
-      </div>
-
-      <div style={{ ...card, padding: 20, marginTop: 16 }}>
-        <div style={label}>Account &amp; Sync</div>
-        {!isSyncConfigured ? (
-          <p style={{ fontSize: 13, color: T.muted, margin: "10px 0 0", lineHeight: 1.6, fontFamily: SANS }}>
-            Saved on this device. Add your Supabase keys (see SUPABASE_SETUP.md) and redeploy to sync across devices.
-          </p>
-        ) : session ? (<>
-          <p style={{ fontSize: 13, color: T.muted, margin: "10px 0 4px", fontFamily: SANS }}>Signed in as <strong style={{ color: T.text }}>{session.user.email}</strong></p>
-          <p style={{ fontSize: 12, color: T.dim, margin: "0 0 14px", fontFamily: SANS }}>{syncStatus === "saving" ? "Saving…" : syncStatus === "offline" ? "Offline — syncs when reconnected." : syncStatus === "error" ? "Sync error." : "Synced across your devices."}</p>
-          <button onClick={onSignOut} style={{ ...btnOutline, width: "100%", padding: 11 }}>Sign out</button>
-        </>) : (<>
-          <p style={{ fontSize: 13, color: T.muted, margin: "10px 0 14px", lineHeight: 1.6, fontFamily: SANS }}>Sign in to keep your reflections and intentions across your devices.</p>
-          <button onClick={onOpenAuth} style={{ ...btn, width: "100%", padding: 11 }}>Sign in or create account</button>
-        </>)}
-      </div>
-
-      <div style={{ ...card, padding: 20, marginTop: 16, borderColor: "rgba(192,66,74,0.25)" }}>
-        <div style={{ ...label, color: T.crimson }}>Start over</div>
-        <p style={{ fontSize: 13, color: T.muted, margin: "10px 0 14px", lineHeight: 1.5, fontFamily: SANS }}>Clears your profile, reflections, and intentions.</p>
-        <button onClick={() => { if (window.confirm("Start over? This clears your saved data and can't be undone.")) onReset(); }}
-          style={{ ...btnOutline, width: "100%", padding: 12, color: T.crimson, borderColor: "rgba(192,66,74,0.35)" }}>Reset all data</button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Navigation ───────────────────────────────────────────────────────────────
-const NAV = [
-  { id: "weeks", label: "Weeks", Icon: IconWeeks },
-  { id: "reflect", label: "Reflect", Icon: IconReflect },
-  { id: "intentions", label: "Legacy", Icon: IconIntentions },
-];
-
-function Sidebar({ page, setPage, session, syncStatus, onAccount }) {
-  return (
-    <div className="ttl-sidebar" style={{ width: 220, height: "100%", background: "rgba(10,10,12,0.6)", borderRight: `1px solid ${T.cardBorder}`, display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0, position: "relative", zIndex: 4 }}>
-      <div style={{ padding: "8px 20px 22px", display: "flex", alignItems: "center", gap: 9 }}>
-        <HourMark size={24} /><BrandTitle size={20} />
-      </div>
-      <div style={{ flex: 1, padding: "6px 12px" }}>
-        {NAV.map(({ id, label: lbl, Icon }) => {
-          const active = page === id;
+      <div style={{ flex: 1, padding: "8px 0" }}>
+        {nav.map((item) => {
+          const active = page === item.id;
           return (
-            <button key={id} onClick={() => setPage(id)} style={{
-              display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "11px 14px", marginBottom: 3,
-              border: "none", cursor: "pointer", borderRadius: 10, fontFamily: SANS,
-              background: active ? "rgba(201,162,75,0.12)" : "transparent",
-              color: active ? T.text : T.muted, fontSize: 14, fontWeight: active ? 600 : 500, textAlign: "left",
+            <button key={item.id} onClick={() => setPage(item.id)} style={{
+              display: "flex", alignItems: "center", gap: 10, width: "100%",
+              padding: "9px 18px", border: "none", cursor: "pointer",
+              background: active ? "rgba(124,58,237,0.15)" : "transparent",
+              borderLeft: active ? "3px solid #7C3AED" : "3px solid transparent",
+              color: active ? T.text : T.muted, fontSize: 13,
+              fontWeight: active ? 600 : 500, textAlign: "left",
+              transition: "all 0.2s",
             }}>
-              <span style={{ color: active ? T.accentLight : T.muted, display: "flex" }}><Icon size={19} /></span>{lbl}
+              <span style={{ fontSize: 15 }}>{item.icon}</span>{item.label}
             </button>
           );
         })}
       </div>
-      <div style={{ borderTop: `1px solid ${T.cardBorder}`, padding: "12px 16px 4px" }}>
-        <div style={{ marginBottom: 8 }}><SyncBadge session={session} syncStatus={syncStatus} onClick={onAccount} /></div>
-        <button onClick={() => setPage("settings")} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "10px 2px", border: "none", cursor: "pointer", background: "transparent", color: page === "settings" ? T.text : T.muted, fontSize: 14, fontWeight: 500, textAlign: "left", fontFamily: SANS }}>
-          <span style={{ display: "flex" }}><IconSettings size={19} /></span> Settings
+
+      <div style={{ borderTop: `1px solid ${T.cardBorder}`, padding: "10px 16px 8px" }}>
+        <div style={{ marginBottom: 8 }}>
+          <SyncBadge session={session} syncStatus={syncStatus} onClick={onAccount} />
+        </div>
+        <button onClick={() => setPage("settings")} style={{
+          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          padding: "9px 2px", border: "none", cursor: "pointer", background: "transparent",
+          color: page === "settings" ? T.text : T.muted, fontSize: 13, fontWeight: 500, textAlign: "left",
+        }}>
+          <span style={{ fontSize: 15 }}>{"\u2699\uFE0F"}</span> Settings
         </button>
       </div>
     </div>
   );
 }
 
-function MobileTopBar({ session, syncStatus, onAccount, setPage }) {
+// ─── Mobile navigation (phone layout) ───────────────────────────────────────
+
+const MOBILE_PRIMARY = [
+  { id: "dashboard", label: "Home", icon: "\u{1F3E0}" },
+  { id: "planner", label: "Month", icon: "\u{1F4CB}" },
+  { id: "timeline", label: "Timeline", icon: "\u{1F4C5}" },
+  { id: "coach", label: "Coach", icon: "\u{1F9ED}" },
+];
+const MOBILE_MORE = [
+  { id: "balance", label: "Life Balance", icon: "\u{1F3AF}" },
+  { id: "reflections", label: "Reflections", icon: "\u{1F4D6}" },
+  { id: "milestones", label: "Milestones", icon: "\u{1F4C8}" },
+  { id: "settings", label: "Settings", icon: "\u2699\uFE0F" },
+];
+
+function MobileTopBar({ currentAge, monthsRemaining, session, syncStatus, onAccount }) {
   return (
-    <div className="ttl-topbar" style={{ position: "sticky", top: 0, zIndex: 40, alignItems: "center", justifyContent: "space-between", padding: "11px 16px", paddingTop: "calc(11px + env(safe-area-inset-top))", background: "rgba(10,10,12,0.9)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.cardBorder}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}><HourMark size={22} /><BrandTitle size={18} /></div>
+    <div className="ttl-topbar" style={{
+      position: "sticky", top: 0, zIndex: 40, alignItems: "center",
+      justifyContent: "space-between", padding: "10px 14px",
+      background: "rgba(19,17,28,0.92)", backdropFilter: "blur(10px)",
+      borderBottom: `1px solid ${T.cardBorder}`,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <HourglassIcon size={22} /><BrandTitle size={16} />
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 12, color: T.muted, fontWeight: 500, whiteSpace: "nowrap" }}>
+          Age <span style={{ color: T.accentLight, fontWeight: 700 }}>{currentAge}</span>
+        </div>
         <SyncBadge session={session} syncStatus={syncStatus} onClick={onAccount} compact />
-        <button onClick={() => setPage("settings")} title="Settings" style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", display: "flex", padding: 2 }}><IconSettings size={20} /></button>
       </div>
     </div>
   );
 }
 
-function BottomNav({ page, setPage }) {
+function BottomNav({ page, setPage, moreOpen, setMoreOpen }) {
+  const moreActive = moreOpen || MOBILE_MORE.some(m => m.id === page);
+  const Tab = ({ icon, label, active, onClick }) => (
+    <button onClick={onClick} style={{
+      flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+      gap: 3, background: "none", border: "none", cursor: "pointer",
+      padding: "8px 0 4px", color: active ? T.accentLight : T.dim,
+    }}>
+      <span style={{ fontSize: 19, lineHeight: 1 }}>{icon}</span>
+      <span style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
+    </button>
+  );
   return (
-    <div className="ttl-bottomnav" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, background: "rgba(10,10,12,0.96)", backdropFilter: "blur(12px)", borderTop: `1px solid ${T.cardBorder}`, paddingBottom: "env(safe-area-inset-bottom)" }}>
-      {NAV.map(({ id, label: lbl, Icon }) => {
-        const active = page === id;
-        return (
-          <button key={id} onClick={() => setPage(id)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: "10px 0 6px", color: active ? T.accentLight : T.dim, fontFamily: SANS }}>
-            <Icon size={21} /><span style={{ fontSize: 10.5, fontWeight: 600 }}>{lbl}</span>
-          </button>
-        );
-      })}
+    <div className="ttl-bottomnav" style={{
+      position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60,
+      background: "rgba(19,17,28,0.96)", backdropFilter: "blur(12px)",
+      borderTop: `1px solid ${T.cardBorder}`,
+      paddingBottom: "env(safe-area-inset-bottom)",
+    }}>
+      {MOBILE_PRIMARY.map(item => (
+        <Tab key={item.id} icon={item.icon} label={item.label}
+          active={!moreOpen && page === item.id}
+          onClick={() => { setMoreOpen(false); setPage(item.id); }} />
+      ))}
+      <Tab icon={"\u2630"} label="More" active={moreActive} onClick={() => setMoreOpen(o => !o)} />
     </div>
   );
 }
 
-// ─── Cloud sync ───────────────────────────────────────────────────────────────
+function MoreSheet({ page, setPage, onClose }) {
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex: 70, background: "rgba(0,0,0,0.5)",
+      display: "flex", alignItems: "flex-end",
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "100%", background: T.bgAlt,
+        borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        borderTop: `1px solid ${T.cardBorder}`, padding: "8px 12px",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
+      }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: T.cardBorder, margin: "6px auto 12px" }} />
+        {MOBILE_MORE.map(item => (
+          <button key={item.id} onClick={() => { setPage(item.id); onClose(); }} style={{
+            display: "flex", alignItems: "center", gap: 12, width: "100%",
+            padding: "14px 12px", border: "none", borderRadius: 12, cursor: "pointer",
+            background: page === item.id ? "rgba(124,58,237,0.15)" : "transparent",
+            color: page === item.id ? T.text : T.muted, fontSize: 15, fontWeight: 600, textAlign: "left",
+          }}>
+            <span style={{ fontSize: 20 }}>{item.icon}</span>{item.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResponsiveStyles() {
+  const css = `
+.ttl-topbar, .ttl-bottomnav { display: none; }
+@media (max-width: 768px) {
+  .ttl-sidebar { display: none !important; }
+  .ttl-topbar { display: flex !important; }
+  .ttl-bottomnav { display: flex !important; }
+  .ttl-page > div { padding: 14px 16px calc(92px + env(safe-area-inset-bottom)) !important; max-width: 100% !important; margin: 0 !important; }
+  .ttl-page h1 { font-size: 22px !important; }
+  .ttl-row { flex-direction: column !important; gap: 16px !important; }
+  .ttl-side { width: 100% !important; flex-shrink: 1 !important; }
+  .ttl-stats { gap: 18px !important; flex-wrap: wrap !important; }
+}`;
+  return <style dangerouslySetInnerHTML={{ __html: css }} />;
+}
+
+// ─── Category Legend ──────────────────────────────────────────────────────────
+
+function CategoryLegend() {
+  return (
+    <div style={{ ...card, display: "flex", alignItems: "center", justifyContent: "center", gap: 14, padding: "10px 20px", flexWrap: "wrap" }}>
+      {CATEGORIES.map((c) => (
+        <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.muted, fontWeight: 500 }}>
+          <div style={{ width: 9, height: 9, borderRadius: "50%", background: c.color }} />{c.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Event helpers (a month holds a list of events) ──────────────────────────
+// Each month slot stores an array of events. Older saves may hold a single event
+// object; normalize so the rest of the app always sees an array.
+function monthEvents(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object" && value.title) return [value];
+  return [];
+}
+function allTimelineEvents(events) {
+  return Object.entries(events).flatMap(([k, v]) => (k.startsWith("day-") ? [] : monthEvents(v)));
+}
+
+// ─── Dot Grid ────────────────────────────────────────────────────────────────
+
+function DotGrid({ birthYear, events, onDotClick, startYear, endYear, compact }) {
+  const now = new Date();
+  const cy = now.getFullYear(), cm = now.getMonth();
+  const rows = [];
+
+  for (let yr = startYear; yr <= endYear; yr++) {
+    const age = yr - birthYear;
+    const dots = [];
+    for (let m = 0; m < 12; m++) {
+      const key = `${yr}-${m}`;
+      const isPast = yr < cy || (yr === cy && m < cm);
+      const isCurrent = yr === cy && m === cm;
+      const ev = events[key];
+      const evs = monthEvents(ev);
+      const dotColor = evs.length ? CAT_MAP[evs[0].category]?.color || "#888" : null;
+
+      dots.push(
+        <div key={key} onClick={() => onDotClick?.(yr, m)}
+          style={{ position: "relative", width: compact ? 18 : 26, height: compact ? 18 : 26, cursor: onDotClick ? "pointer" : "default" }}>
+          <div
+            style={{
+              width: "100%", height: "100%", borderRadius: "50%",
+              background: isCurrent ? "linear-gradient(135deg, #F59E0B, #F97316)"
+                : dotColor ? dotColor
+                : isPast ? "rgba(255,255,255,0.05)"
+                : "rgba(255,255,255,0.16)",
+              transition: "transform 0.15s",
+              boxShadow: isCurrent ? "0 0 10px rgba(245,158,11,0.4)" : dotColor ? `0 0 6px ${dotColor}44` : "none",
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.transform = "scale(1.3)"; }}
+            onMouseOut={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+          />
+          {evs.length > 1 && (
+            <div style={{
+              position: "absolute", top: -4, right: -4, minWidth: 13, height: 13, padding: "0 3px",
+              borderRadius: 7, background: "#13111C", border: "1px solid rgba(255,255,255,0.3)",
+              color: "#fff", fontSize: 9, fontWeight: 700, lineHeight: "12px", textAlign: "center", boxSizing: "border-box",
+            }}>{evs.length}</div>
+          )}
+        </div>
+      );
+    }
+    rows.push(
+      <div key={yr} style={{ display: "flex", alignItems: "center", gap: compact ? 4 : 8, marginBottom: compact ? 3 : 5 }}>
+        <div style={{ width: 58, textAlign: "right", paddingRight: 6, flexShrink: 0 }}>
+          <span style={{ fontSize: compact ? 11 : 13, fontWeight: 700, color: T.text }}>{yr}</span>
+          <span style={{ fontSize: 9, color: T.dim, marginLeft: 3 }}>{age}</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(12, minmax(${compact ? 18 : 26}px, 1fr))`, gap: compact ? 4 : 8, flex: 1, justifyItems: "center" }}>
+          {dots}
+        </div>
+      </div>
+    );
+  }
+  return <div>{rows}</div>;
+}
+
+// ─── Event Modal ─────────────────────────────────────────────────────────────
+
+function EventModal({ year, month, items, onChange, onClose }) {
+  const [editIdx, setEditIdx] = useState(null); // null = adding a new event
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("career");
+  const [notes, setNotes] = useState("");
+
+  const resetForm = () => { setEditIdx(null); setTitle(""); setCategory("career"); setNotes(""); };
+
+  const startEdit = (i) => {
+    const e = items[i];
+    setEditIdx(i); setTitle(e.title || ""); setCategory(e.category || "career"); setNotes(e.notes || "");
+  };
+
+  const save = () => {
+    if (!title.trim()) return;
+    const ev = { title: title.trim(), category, notes };
+    const next = editIdx === null ? [...items, ev] : items.map((it, i) => (i === editIdx ? ev : it));
+    onChange(next);
+    resetForm();
+  };
+
+  const remove = (i) => {
+    onChange(items.filter((_, idx) => idx !== i));
+    if (editIdx === i) resetForm();
+    else if (editIdx !== null && i < editIdx) setEditIdx(editIdx - 1);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }} onClick={onClose}>
+      <div style={{ ...card, background: T.bgAlt, padding: 24, width: 420, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", border: `1px solid rgba(124,58,237,0.2)` }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ margin: "0 0 4px", color: T.text, fontSize: 20 }}>{MONTH_FULL[month]} {year}</h3>
+        <p style={{ margin: "0 0 16px", fontSize: 13, color: T.muted }}>
+          {items.length === 0 ? "Add an event to your timeline" : `${items.length} event${items.length > 1 ? "s" : ""} this month`}
+        </p>
+
+        {/* Existing events for this month */}
+        {items.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            {items.map((e, i) => {
+              const c = CAT_MAP[e.category];
+              const isEditing = editIdx === i;
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", marginBottom: 6,
+                  borderRadius: 10, background: isEditing ? "rgba(124,58,237,0.15)" : "rgba(255,255,255,0.04)",
+                  border: `1px solid ${isEditing ? "rgba(124,58,237,0.4)" : T.cardBorder}`,
+                }}>
+                  <div style={{ width: 9, height: 9, borderRadius: "50%", background: c?.color || "#888", flexShrink: 0 }} />
+                  <div onClick={() => startEdit(i)} style={{ flex: 1, cursor: "pointer", minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.title}</div>
+                    <div style={{ fontSize: 11, color: T.dim }}>{c?.label || e.category}</div>
+                  </div>
+                  <button onClick={() => startEdit(i)} title="Edit" style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, padding: 4 }}>{"\u270E"}</button>
+                  <button onClick={() => remove(i)} title="Delete" style={{ background: "none", border: "none", color: "#EF4444", cursor: "pointer", fontSize: 14, padding: 4 }}>{"\u2715"}</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add / edit form */}
+        <div style={{ borderTop: items.length > 0 ? `1px solid ${T.cardBorder}` : "none", paddingTop: items.length > 0 ? 16 : 0 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>
+            {editIdx === null ? "Add an event" : "Edit event"}
+          </label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Trip to Japan" style={{ ...inputStyle, marginTop: 6, marginBottom: 16 }} />
+
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Category</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, marginBottom: 16 }}>
+            {CATEGORIES.map((c) => (
+              <button key={c.key} onClick={() => setCategory(c.key)} style={{
+                padding: "5px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                background: category === c.key ? c.color : "rgba(255,255,255,0.05)",
+                color: category === c.key ? "#FFF" : T.muted,
+                border: category === c.key ? "none" : `1px solid ${T.cardBorder}`,
+              }}>{c.label}</button>
+            ))}
+          </div>
+
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Notes</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Details..."
+            style={{ ...inputStyle, marginTop: 6, marginBottom: 20, resize: "vertical" }} />
+
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            {editIdx !== null && <button onClick={resetForm} style={btnOutline}>Cancel edit</button>}
+            <button onClick={onClose} style={btnOutline}>Close</button>
+            <button onClick={save} style={btn}>{editIdx === null ? "Add Event" : "Update"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+
+function DashboardPage({ config, events, setEvents, setPage }) {
+  const [modal, setModal] = useState(null);
+  const now = new Date();
+  const cy = now.getFullYear();
+  const birthYear = cy - config.currentAge;
+  const monthsRem = (config.targetAge - config.currentAge) * 12 - now.getMonth();
+  const yearsRem = config.targetAge - config.currentAge;
+  const evCount = allTimelineEvents(events).length;
+  const dashEnd = Math.min(cy + 2, birthYear + config.targetAge);
+  const moreYears = (birthYear + config.targetAge) - dashEnd;
+
+  // Life balance nudge
+  const catCounts = {};
+  CATEGORIES.forEach(c => catCounts[c.key] = 0);
+  allTimelineEvents(events).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
+  const neglected = total > 3 ? CATEGORIES.filter(c => catCounts[c.key] === 0).map(c => c.label) : [];
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1100 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 8 }}>
+        <HourglassIcon size={30} /><BrandTitle size={20} />
+      </div>
+      <h1 style={{ textAlign: "center", color: T.text, fontSize: 30, fontWeight: 300, margin: "16px 0 24px", fontStyle: "italic" }}>Your Life Timeline</h1>
+
+      <div className="ttl-stats" style={{ display: "flex", justifyContent: "center", gap: 40, marginBottom: 24 }}>
+        {[{ v: config.currentAge, l: "Current Age" }, { v: config.targetAge, l: "Target Age" }, { v: monthsRem, l: "Months Left" }, { v: yearsRem, l: "Years Left" }].map((s, i) => (
+          <div key={i} style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 34, fontWeight: 700, background: T.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{s.v}</div>
+            <div style={{ fontSize: 12, color: T.muted, fontWeight: 500 }}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      <CategoryLegend />
+
+      {evCount === 0 && (
+        <div style={{ ...card, background: "rgba(124,58,237,0.06)", textAlign: "center", padding: 24, margin: "20px auto", maxWidth: 480 }}>
+          <div style={{ fontSize: 26, marginBottom: 6 }}>{"\u2728"}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: T.text }}>Your timeline is waiting</div>
+          <div style={{ fontSize: 13, color: T.muted, marginTop: 4 }}>Click any dot to add an event — a trip, a job change, a big decision.</div>
+        </div>
+      )}
+
+      {neglected.length > 0 && (
+        <div style={{ ...card, background: "rgba(236,72,153,0.06)", padding: "14px 20px", margin: "16px 0", display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 20 }}>{"\u{1F4A1}"}</span>
+          <div style={{ fontSize: 13, color: T.muted }}>
+            <span style={{ color: T.pink, fontWeight: 600 }}>Life balance nudge:</span> You haven't planned any {neglected.slice(0, 3).join(", ")} events yet. Tap a dot to start.
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16, overflowX: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <div style={{ width: 58, flexShrink: 0 }} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(26px, 1fr))", gap: 8, flex: 1 }}>
+            {MONTH_COLS.map((m, i) => <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: T.dim }}>{m}</div>)}
+          </div>
+        </div>
+        <DotGrid birthYear={birthYear} events={events} onDotClick={(yr, m) => setModal({ year: yr, month: m })} startYear={cy} endYear={dashEnd} />
+      </div>
+
+      {moreYears > 0 && (
+        <div style={{ textAlign: "center", margin: "12px 0", fontSize: 12, color: T.dim }}>
+          <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+            {["#22C55E","#F59E0B","#EC4899"].map((c,i) => <span key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: c }} />)}
+            <span style={{ marginLeft: 4 }}>{moreYears} more years to explore</span>
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 10 }}>
+        <button onClick={() => setPage("timeline")} style={btnOutline}>View Full Timeline</button>
+        <button onClick={() => setPage("balance")} style={btnOutline}>{"\u{1F3AF}"} Life Balance</button>
+        <button onClick={() => setPage("planner")} style={btnOutline}>{"\u{1F4CB}"} Plan This Month</button>
+      </div>
+
+      {modal && <EventModal year={modal.year} month={modal.month}
+        items={monthEvents(events[`${modal.year}-${modal.month}`])}
+        onChange={(arr) => setEvents(p => { const k = `${modal.year}-${modal.month}`; const n = { ...p }; if (arr.length) n[k] = arr; else delete n[k]; return n; })}
+        onClose={() => setModal(null)} />}
+    </div>
+  );
+}
+
+// ─── Near-Term Planner (This Month) ──────────────────────────────────────────
+
+function PlannerPage({ config, events, setEvents }) {
+  const now = new Date();
+  const [view, setView] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const cy = view.y, cm = view.m;
+  const daysInMonth = new Date(cy, cm + 1, 0).getDate();
+  const firstDow = new Date(cy, cm, 1).getDay();
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [activity, setActivity] = useState("");
+  const [actCat, setActCat] = useState("career");
+  const isThisMonth = cy === now.getFullYear() && cm === now.getMonth();
+  const shiftMonth = (delta) => {
+    const d = new Date(cy, cm + delta, 1);
+    setView({ y: d.getFullYear(), m: d.getMonth() });
+    setSelectedDay(null);
+  };
+  const goToday = () => { setView({ y: now.getFullYear(), m: now.getMonth() }); setSelectedDay(null); };
+  const navArrow = {
+    width: 36, height: 36, borderRadius: 10, border: `1px solid ${T.cardBorder}`,
+    background: "rgba(255,255,255,0.05)", color: T.text, fontSize: 20, lineHeight: 1,
+    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  };
+
+  // Day-level data stored as events with day key
+  const dayKey = (d) => `day-${cy}-${cm}-${d}`;
+  const dayActivities = (d) => {
+    const k = dayKey(d);
+    return events[k]?.activities || [];
+  };
+
+  const addActivity = (d) => {
+    if (!activity.trim()) return;
+    const k = dayKey(d);
+    const existing = events[k]?.activities || [];
+    setEvents(p => ({ ...p, [k]: { ...p[k], activities: [...existing, { text: activity, category: actCat, done: false }] } }));
+    setActivity("");
+  };
+
+  const toggleDone = (d, idx) => {
+    const k = dayKey(d);
+    const acts = [...(events[k]?.activities || [])];
+    acts[idx] = { ...acts[idx], done: !acts[idx].done };
+    setEvents(p => ({ ...p, [k]: { ...p[k], activities: acts } }));
+  };
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(<div key={`e${i}`} />);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const isToday = isThisMonth && d === now.getDate();
+    const isSel = d === selectedDay;
+    const acts = dayActivities(d);
+    const cats = [...new Set(acts.map(a => a.category))];
+    cells.push(
+      <div key={d} onClick={() => setSelectedDay(isSel ? null : d)} style={{
+        aspectRatio: "1", display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", borderRadius: 12, cursor: "pointer",
+        background: isSel ? "rgba(124,58,237,0.2)" : isToday ? T.gradient : "rgba(255,255,255,0.03)",
+        border: isSel ? "2px solid #7C3AED" : "2px solid transparent",
+        color: isToday ? "#FFF" : T.muted, fontSize: 14, fontWeight: isToday ? 700 : 500,
+        transition: "all 0.15s", gap: 2,
+      }}>
+        <span>{d}</span>
+        <div style={{ display: "flex", gap: 2, height: 4 }}>
+          {cats.slice(0, 4).map(c => <div key={c} style={{ width: 4, height: 4, borderRadius: "50%", background: CAT_MAP[c]?.color }} />)}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 900 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "0 0 4px", flexWrap: "wrap" }}>
+        <button onClick={() => shiftMonth(-1)} aria-label="Previous month" style={navArrow}>{"\u2039"}</button>
+        <h1 style={{ color: T.text, fontSize: 26, fontWeight: 300, fontStyle: "italic", margin: 0 }}>
+          {MONTH_FULL[cm]} {cy}
+        </h1>
+        <button onClick={() => shiftMonth(1)} aria-label="Next month" style={navArrow}>{"\u203A"}</button>
+        {!isThisMonth && <button onClick={goToday} style={{ ...btnOutline, padding: "6px 14px", fontSize: 12 }}>Today</button>}
+      </div>
+      <p style={{ color: T.muted, fontSize: 13, margin: "0 0 20px" }}>Plan your days with intention. Tap a day to add activities.</p>
+
+      <div className="ttl-row" style={{ display: "flex", gap: 24 }}>
+        {/* Calendar */}
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 4 }}>
+            {DAY_NAMES.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, fontWeight: 600, color: T.dim, padding: 4 }}>{d}</div>)}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>{cells}</div>
+        </div>
+
+        {/* Day detail */}
+        <div className="ttl-side" style={{ width: 320, flexShrink: 0 }}>
+          {selectedDay ? (
+            <div style={{ ...card, padding: 20 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: T.text, marginBottom: 4 }}>
+                {DAY_NAMES[new Date(cy, cm, selectedDay).getDay()]}, {MONTH_FULL[cm]} {selectedDay}
+              </div>
+
+              {/* Activities list */}
+              {dayActivities(selectedDay).length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  {dayActivities(selectedDay).map((a, i) => (
+                    <div key={i} onClick={() => toggleDone(selectedDay, i)} style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+                      borderBottom: `1px solid ${T.cardBorder}`, cursor: "pointer",
+                    }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_MAP[a.category]?.color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, color: a.done ? T.dim : T.text, textDecoration: a.done ? "line-through" : "none", flex: 1 }}>{a.text}</span>
+                      <span style={{ fontSize: 11, color: T.dim }}>{a.done ? "\u2713" : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add activity */}
+              <input value={activity} onChange={(e) => setActivity(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addActivity(selectedDay)}
+                placeholder="Add an activity..." style={{ ...inputStyle, marginBottom: 8 }} />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
+                {CATEGORIES.map(c => (
+                  <button key={c.key} onClick={() => setActCat(c.key)} style={{
+                    padding: "3px 10px", borderRadius: 16, fontSize: 10, fontWeight: 600, cursor: "pointer",
+                    background: actCat === c.key ? c.color : "rgba(255,255,255,0.05)",
+                    color: actCat === c.key ? "#FFF" : T.dim, border: "none",
+                  }}>{c.label}</button>
+                ))}
+              </div>
+              <button onClick={() => addActivity(selectedDay)} style={{ ...btn, width: "100%", padding: 10, fontSize: 13 }}>Add</button>
+            </div>
+          ) : (
+            <div style={{ ...card, padding: 24, textAlign: "center" }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}>{"\u{1F4CB}"}</div>
+              <div style={{ fontSize: 14, color: T.dim }}>Select a day to plan activities</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Full Timeline ───────────────────────────────────────────────────────────
+
+function TimelinePage({ config, events, setEvents, setPage }) {
+  const [modal, setModal] = useState(null);
+  const now = new Date();
+  const birthYear = now.getFullYear() - config.currentAge;
+  const endYear = birthYear + config.targetAge;
+  const totalMonths = config.targetAge * 12;
+  const evCount = allTimelineEvents(events).length;
+  const monthsPlanned = Object.entries(events).filter(([k, v]) => !k.startsWith("day-") && monthEvents(v).length).length;
+  const cy = now.getFullYear();
+  const [showPast, setShowPast] = useState(false);
+  const gridStart = showPast ? birthYear : cy;
+  const pastYears = Math.max(0, cy - birthYear);
+  const pastEventCount = Object.entries(events).reduce((sum, [k, v]) => {
+    if (k.startsWith("day-")) return sum;
+    const yr = parseInt(k.split("-")[0], 10);
+    return sum + (yr < cy ? monthEvents(v).length : 0);
+  }, 0);
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1200 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <button onClick={() => setPage("dashboard")} style={{ background: "none", border: "none", color: T.muted, fontSize: 13, cursor: "pointer", padding: 0 }}>{"\u2190"} Back</button>
+          <h1 style={{ color: T.text, fontSize: 26, fontWeight: 300, margin: "4px 0 0", fontStyle: "italic" }}>Complete Timeline</h1>
+          <div style={{ fontSize: 12, color: T.dim }}>Birth to age {config.targetAge} &middot; {totalMonths} months</div>
+        </div>
+        <div style={{ display: "flex", gap: 16, fontSize: 12, color: T.muted }}>
+          <span>{evCount} events</span><span>{totalMonths > 0 ? Math.round((monthsPlanned / totalMonths) * 100) : 0}% planned</span>
+        </div>
+      </div>
+      <CategoryLegend />
+      {pastYears > 0 && (
+        <div onClick={() => setShowPast(s => !s)} style={{
+          ...card, marginTop: 12, padding: "10px 16px", display: "flex", alignItems: "center",
+          justifyContent: "space-between", cursor: "pointer", background: "rgba(255,255,255,0.03)",
+        }}>
+          <span style={{ fontSize: 13, color: T.muted }}>
+            <span style={{ color: T.accentLight, fontWeight: 700, marginRight: 8 }}>{showPast ? "\u25BE" : "\u25B8"}</span>
+            {showPast ? "Hide" : "Show"} {pastYears} past {pastYears === 1 ? "year" : "years"}
+            {pastEventCount > 0 && <span style={{ color: T.dim }}> &middot; {pastEventCount} {pastEventCount === 1 ? "event" : "events"}</span>}
+          </span>
+          <span style={{ fontSize: 11, color: T.dim }}>{showPast ? "collapse to today" : "timeline starts at this year"}</span>
+        </div>
+      )}
+      <div style={{ marginTop: 16, overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+          <div style={{ width: 58, flexShrink: 0 }} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(18px, 1fr))", gap: 4, flex: 1 }}>
+            {MONTH_COLS.map((m, i) => <div key={i} style={{ textAlign: "center", fontSize: 10, fontWeight: 600, color: T.dim }}>{m}</div>)}
+          </div>
+        </div>
+        <div style={{ maxHeight: "68vh", overflowY: "auto" }}>
+          <DotGrid birthYear={birthYear} events={events} onDotClick={(yr, m) => setModal({ year: yr, month: m })} startYear={gridStart} endYear={endYear} compact />
+        </div>
+      </div>
+      {modal && <EventModal year={modal.year} month={modal.month}
+        items={monthEvents(events[`${modal.year}-${modal.month}`])}
+        onChange={(arr) => setEvents(p => { const k = `${modal.year}-${modal.month}`; const n = { ...p }; if (arr.length) n[k] = arr; else delete n[k]; return n; })}
+        onClose={() => setModal(null)} />}
+    </div>
+  );
+}
+
+// ─── Life Balance Scoring ────────────────────────────────────────────────────
+
+function BalancePage({ events, config }) {
+  const catCounts = {};
+  CATEGORIES.forEach(c => catCounts[c.key] = 0);
+  // Count timeline events
+  Object.entries(events).forEach(([k, v]) => {
+    if (k.startsWith("day-")) return;
+    monthEvents(v).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  });
+  // Count daily activities
+  Object.entries(events).forEach(([k, ev]) => {
+    if (k.startsWith("day-") && ev?.activities) {
+      ev.activities.forEach(a => { if (catCounts[a.category] !== undefined) catCounts[a.category]++; });
+    }
+  });
+
+  const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
+  const ideal = total > 0 ? 100 / CATEGORIES.length : 0;
+
+  // Balance score: 100 = perfectly balanced, 0 = all in one category
+  const balanceScore = total > 0
+    ? Math.round(100 - CATEGORIES.reduce((sum, c) => {
+        const pct = (catCounts[c.key] / total) * 100;
+        return sum + Math.abs(pct - ideal);
+      }, 0) / 2)
+    : 0;
+
+  const neglected = total >= 3 ? CATEGORIES.filter(c => catCounts[c.key] === 0) : [];
+  const dominant = total >= 3 ? CATEGORIES.reduce((a, b) => catCounts[a.key] > catCounts[b.key] ? a : b) : null;
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 700, margin: "0 auto" }}>
+      <h1 style={{ color: T.text, fontSize: 28, fontWeight: 300, fontStyle: "italic", margin: "0 0 4px" }}>Life Balance</h1>
+      <p style={{ color: T.muted, fontSize: 13, margin: "0 0 24px" }}>How you're distributing your time across what matters</p>
+
+      {/* Score */}
+      <div style={{ ...card, padding: 28, textAlign: "center", marginBottom: 20 }}>
+        <div style={{ fontSize: 56, fontWeight: 800, background: T.gradient, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+          {total > 0 ? balanceScore : "—"}
+        </div>
+        <div style={{ fontSize: 14, color: T.muted, marginTop: 4 }}>
+          {total > 0 ? (balanceScore >= 70 ? "Well balanced! Keep it up." : balanceScore >= 40 ? "Some areas need attention." : "Heavily skewed — consider diversifying.") : "Start adding events to see your score"}
+        </div>
+      </div>
+
+      {/* Category bars */}
+      <div style={{ ...card, padding: 20, marginBottom: 20 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 14 }}>Category Breakdown</div>
+        {CATEGORIES.map(c => {
+          const count = catCounts[c.key];
+          const pct = total > 0 ? (count / total) * 100 : 0;
+          return (
+            <div key={c.key} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: c.color }}>{c.label}</span>
+                <span style={{ fontSize: 12, color: T.muted }}>{count} ({pct.toFixed(0)}%)</span>
+              </div>
+              <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.05)", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, borderRadius: 3, background: c.color, transition: "width 0.5s" }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Nudges */}
+      {(neglected.length > 0 || dominant) && (
+        <div style={{ ...card, padding: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.dim, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 12 }}>Insights & Nudges</div>
+          {neglected.map(c => (
+            <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.cardBorder}` }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: c.color }} />
+              <span style={{ fontSize: 13, color: T.muted }}><span style={{ color: T.text, fontWeight: 600 }}>{c.label}</span> has no events yet. Consider adding something here.</span>
+            </div>
+          ))}
+          {dominant && catCounts[dominant.key] > total * 0.4 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0" }}>
+              <span style={{ fontSize: 15 }}>{"\u26A0\uFE0F"}</span>
+              <span style={{ fontSize: 13, color: T.muted }}><span style={{ color: dominant.color, fontWeight: 600 }}>{dominant.label}</span> dominates your timeline at {((catCounts[dominant.key] / total) * 100).toFixed(0)}%. Is that intentional?</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Reflections ─────────────────────────────────────────────────────────────
+
+function ReflectionsPage({ reflections, setReflections, events }) {
+  const [showForm, setShowForm] = useState(false);
+  const [text, setText] = useState("");
+  const [mood, setMood] = useState("grateful");
+
+  // Generate retrospective prompt
+  const catCounts = {};
+  CATEGORIES.forEach(c => catCounts[c.key] = 0);
+  allTimelineEvents(events).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
+  const emptyCategories = total >= 3 ? CATEGORIES.filter(c => catCounts[c.key] === 0) : [];
+  const retroPrompt = emptyCategories.length > 0
+    ? RETROSPECTIVE_PROMPTS[1].text(emptyCategories[0].label)
+    : RETROSPECTIVE_PROMPTS[0].text;
+
+  const addReflection = () => {
+    if (!text.trim()) return;
+    setReflections(p => [{ id: Date.now(), text, mood, date: new Date().toLocaleDateString() }, ...p]);
+    setText(""); setShowForm(false);
+  };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 800, margin: "0 auto" }}>
+      <h1 style={{ color: T.text, fontSize: 28, fontWeight: 300, fontStyle: "italic", margin: "0 0 4px" }}>Life Reflections</h1>
+      <p style={{ color: T.muted, fontSize: 13, margin: "0 0 24px" }}>Capture your thoughts, insights, and moments of growth.</p>
+
+      {/* Retrospective prompt */}
+      <div style={{ ...card, background: "rgba(124,58,237,0.06)", padding: "16px 20px", marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" }}
+        onClick={() => { setText(retroPrompt); setShowForm(true); }}>
+        <span style={{ fontSize: 20 }}>{"\u{1F4AD}"}</span>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Reflection Prompt</div>
+          <div style={{ fontSize: 13, color: T.muted, lineHeight: 1.5 }}>{retroPrompt}</div>
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <button onClick={() => setShowForm(!showForm)} style={btnOutline}>+ Add Reflection</button>
+      </div>
+
+      {showForm && (
+        <div style={{ ...card, padding: 24, marginBottom: 24 }}>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="What's on your mind?"
+            style={{ ...inputStyle, marginBottom: 12, resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            {["grateful","reflective","motivated","peaceful","challenged"].map(m => (
+              <button key={m} onClick={() => setMood(m)} style={{
+                padding: "5px 12px", borderRadius: 20, fontSize: 11, fontWeight: 500, cursor: "pointer",
+                background: mood === m ? "#7C3AED" : "rgba(255,255,255,0.05)",
+                color: mood === m ? "#FFF" : T.muted, border: "none", textTransform: "capitalize",
+              }}>{m}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={addReflection} style={btn}>Save Reflection</button>
+          </div>
+        </div>
+      )}
+
+      {reflections.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 0", color: T.dim }}>
+          <div style={{ fontSize: 40, marginBottom: 8, opacity: 0.3 }}>{"\u{1F4D6}"}</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: T.muted }}>No reflections yet</div>
+          <div style={{ fontSize: 13 }}>Start capturing your thoughts about your life journey.</div>
+        </div>
+      ) : reflections.map(r => (
+        <div key={r.id} style={{ ...card, padding: 18, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ padding: "3px 10px", borderRadius: 16, fontSize: 10, fontWeight: 600, background: "rgba(124,58,237,0.15)", color: T.accentLight, textTransform: "capitalize" }}>{r.mood}</span>
+            <span style={{ fontSize: 11, color: T.dim }}>{r.date}</span>
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: T.muted, lineHeight: 1.6 }}>{r.text}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Milestones ──────────────────────────────────────────────────────────────
+
+function MilestonesPage({ milestones, setMilestones }) {
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState("");
+  const [recurring, setRecurring] = useState(false);
+
+  const add = () => {
+    if (!title.trim() || !date) return;
+    setMilestones(p => [...p, { id: Date.now(), title, date, recurring }]);
+    setTitle(""); setDate(""); setRecurring(false); setShowForm(false);
+  };
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 800, margin: "0 auto" }}>
+      <h1 style={{ color: T.text, fontSize: 28, fontWeight: 300, fontStyle: "italic", margin: "0 0 4px" }}>Life Milestones</h1>
+      <p style={{ color: T.muted, fontSize: 13, margin: "0 0 24px" }}>Track important dates and recurring events that matter to you</p>
+
+      <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <button onClick={() => setShowForm(!showForm)} style={btnOutline}>+ Add Milestone</button>
+      </div>
+
+      {showForm && (
+        <div style={{ ...card, padding: 24, marginBottom: 24 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Mum's birthday" style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.muted, marginBottom: 14, cursor: "pointer" }}>
+            <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} /> Recurring annually
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={add} style={btn}>Save Milestone</button>
+          </div>
+        </div>
+      )}
+
+      {milestones.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 0", color: T.dim }}>
+          <div style={{ fontSize: 40, marginBottom: 8, opacity: 0.3 }}>{"\u{1F4C5}"}</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: T.muted }}>No milestones yet</div>
+          <div style={{ fontSize: 13 }}>Add your first milestone to start tracking important dates</div>
+        </div>
+      ) : milestones.map(m => (
+        <div key={m.id} style={{ ...card, padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{m.title}</div>
+            <div style={{ fontSize: 12, color: T.dim, marginTop: 2 }}>{m.date}{m.recurring && " \u{1F501} Recurring"}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Life Coach (formerly Mochi) ─────────────────────────────────────────────
+
+function CoachPage({ config, events }) {
+  const [messages, setMessages] = useState([
+    { from: "coach", text: "I'm your Life Coach — here to help you think intentionally about the time ahead. I know your timeline, your events, and your balance. Ask me anything about planning your life, and I'll help you make it count.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+  ]);
+  const [input, setInput] = useState("");
+  const chatRef = useRef(null);
+
+  // Generate context-aware responses
+  const catCounts = {};
+  CATEGORIES.forEach(c => catCounts[c.key] = 0);
+  allTimelineEvents(events).forEach(ev => { if (catCounts[ev.category] !== undefined) catCounts[ev.category]++; });
+  const total = Object.values(catCounts).reduce((a, b) => a + b, 0);
+  const yearsLeft = config.targetAge - config.currentAge;
+
+  const getResponse = (msg) => {
+    const lower = msg.toLowerCase();
+    if (lower.includes("balance") || lower.includes("review")) {
+      const top = CATEGORIES.reduce((a, b) => catCounts[a.key] > catCounts[b.key] ? a : b);
+      const empty = CATEGORIES.filter(c => catCounts[c.key] === 0);
+      if (total === 0) return "Your timeline is empty — that's actually a beautiful blank canvas. Start with what matters most to you right now. What's one area of life you'd like to focus on this month?";
+      return `Looking at your timeline: ${top.label} leads with ${catCounts[top.key]} events. ${empty.length > 0 ? `${empty.map(c => c.label).join(", ")} ${empty.length === 1 ? "has" : "have"} nothing planned yet. ` : ""}You have ${yearsLeft} years ahead — that's ${yearsLeft * 12} months of possibility. What area feels most neglected?`;
+    }
+    if (lower.includes("plan") || lower.includes("quarter") || lower.includes("month")) {
+      return `For this quarter, I'd suggest picking 2-3 categories to focus on. With ${yearsLeft} years remaining, every quarter counts. What are the 3 things that would make this month feel meaningful to you?`;
+    }
+    if (lower.includes("family") || lower.includes("relationship")) {
+      return `Family time is irreplaceable. Consider scheduling regular rituals — weekly dinners, monthly outings, annual traditions. Small consistent investments compound over ${yearsLeft} years into thousands of shared moments. Want me to help you plan some?`;
+    }
+    if (lower.includes("career") || lower.includes("work") || lower.includes("stuck")) {
+      return `Career reflection is powerful. At ${config.currentAge}, you likely have ${Math.max(0, 65 - config.currentAge)} working years left. That's a lot of time to pivot, grow, or double down. What would your ideal work life look like 5 years from now?`;
+    }
+    return `That's a thoughtful question. With ${yearsLeft} years and ${yearsLeft * 12} months ahead of you, every decision shapes the life you're building. Let me think about this in the context of your timeline — what specifically would you like to explore?`;
+  };
+
+  const send = () => {
+    if (!input.trim()) return;
+    const userMsg = { from: "user", text: input, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    setMessages(p => [...p, userMsg]);
+    const response = getResponse(input);
+    setInput("");
+    setTimeout(() => {
+      setMessages(p => [...p, { from: "coach", text: response, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+    }, 800);
+  };
+
+  useEffect(() => { chatRef.current?.scrollTo(0, chatRef.current.scrollHeight); }, [messages]);
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 1050 }}>
+      <div style={{ textAlign: "center", marginBottom: 16 }}>
+        <div style={{ fontSize: 28 }}>{"\u{1F9ED}"}</div>
+        <h1 style={{ color: T.text, fontSize: 26, fontWeight: 300, fontStyle: "italic", margin: "4px 0" }}>Life Coach</h1>
+        <p style={{ color: T.muted, fontSize: 13 }}>Your AI companion for intentional living. Knows your timeline, events, and balance.</p>
+      </div>
+
+      <div className="ttl-row" style={{ display: "flex", gap: 16 }}>
+        <div style={{ ...card, flex: 1, display: "flex", flexDirection: "column", minHeight: 420 }}>
+          <div style={{ padding: "14px 18px", borderBottom: `1px solid ${T.cardBorder}`, fontWeight: 600, color: T.text, fontSize: 14 }}>{"\u{1F4AC}"} Chat</div>
+          <div ref={chatRef} style={{ flex: 1, padding: 18, overflowY: "auto", maxHeight: 360 }}>
+            {messages.map((msg, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: msg.from === "user" ? "flex-end" : "flex-start", marginBottom: 10 }}>
+                <div style={{
+                  maxWidth: "75%", padding: "10px 14px", borderRadius: 12,
+                  background: msg.from === "user" ? T.gradient : "rgba(255,255,255,0.05)",
+                  color: msg.from === "user" ? "#FFF" : T.muted, fontSize: 13, lineHeight: 1.5,
+                }}>
+                  {msg.from === "coach" && <span style={{ marginRight: 4 }}>{"\u{1F9ED}"}</span>}
+                  {msg.text}
+                  <div style={{ fontSize: 10, color: msg.from === "user" ? "rgba(255,255,255,0.5)" : T.dim, marginTop: 3 }}>{msg.time}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: "10px 14px", borderTop: `1px solid ${T.cardBorder}`, display: "flex", gap: 8 }}>
+            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()}
+              placeholder="Ask about your life plan..." style={{ ...inputStyle, flex: 1 }} />
+            <button onClick={send} style={{ ...btn, padding: "10px 14px", borderRadius: 10, fontSize: 16 }}>{"\u27A4"}</button>
+          </div>
+        </div>
+
+        <div className="ttl-side" style={{ width: 260, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ ...card, padding: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 10 }}>Conversation Starters</div>
+            {COACH_PROMPTS.map((s, i) => (
+              <button key={i} onClick={() => setInput(s)} style={{
+                display: "block", width: "100%", textAlign: "left", background: "none",
+                border: "none", padding: "7px 0", fontSize: 12, color: T.accentLight,
+                cursor: "pointer", borderBottom: i < COACH_PROMPTS.length - 1 ? `1px solid ${T.cardBorder}` : "none", lineHeight: 1.4,
+              }}>{s}</button>
+            ))}
+          </div>
+
+          <div style={{ ...card, padding: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.pink, marginBottom: 10 }}>Your Context</div>
+            {[{ l: "Age", v: config.currentAge }, { l: "Target", v: config.targetAge }, { l: "Years Left", v: yearsLeft }, { l: "Events", v: total }].map((item, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
+                <span style={{ fontSize: 12, color: T.dim }}>{item.l}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: T.accentLight }}>{item.v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+function SettingsPage({ config, setConfig, setPage, onReset, session, syncStatus, onOpenAuth, onSignOut }) {
+  const [currentAge, setCurrentAge] = useState(config.currentAge);
+  const [targetAge, setTargetAge] = useState(config.targetAge);
+
+  return (
+    <div style={{ padding: "24px 32px", maxWidth: 560, margin: "0 auto" }}>
+      <button onClick={() => setPage("dashboard")} style={{ background: "none", border: "none", color: T.muted, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 16 }}>{"\u2190"} Back</button>
+      <div style={{ ...card, padding: 28 }}>
+        <h2 style={{ color: T.text, fontSize: 22, fontWeight: 300, fontStyle: "italic", margin: "0 0 24px" }}>Profile Settings</h2>
+        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Current Age</label>
+        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: "#7C3AED" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+          <span style={{ fontSize: 11, color: T.dim }}>1</span>
+          <span style={{ background: "rgba(124,58,237,0.15)", color: T.accentLight, padding: "3px 14px", borderRadius: 16, fontSize: 13, fontWeight: 700 }}>{currentAge} years old</span>
+          <span style={{ fontSize: 11, color: T.dim }}>100</span>
+        </div>
+
+        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Target Age</label>
+        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: "#7C3AED" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+          <span style={{ fontSize: 11, color: T.dim }}>{currentAge + 1}</span>
+          <span style={{ background: "rgba(124,58,237,0.15)", color: T.accentLight, padding: "3px 14px", borderRadius: 16, fontSize: 13, fontWeight: 700 }}>{targetAge} years old</span>
+          <span style={{ fontSize: 11, color: T.dim }}>120</span>
+        </div>
+
+        <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "10px 14px", textAlign: "center", fontSize: 13, color: T.muted, marginBottom: 20 }}>
+          Timeline: <strong style={{ color: T.text }}>{(targetAge - currentAge) * 12} months</strong> remaining
+        </div>
+
+        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Country</label>
+        <select style={{ ...inputStyle, marginTop: 6, marginBottom: 16 }}>
+          <option value="">Select your country</option>
+          {["Australia","New Zealand","United States","United Kingdom","Canada","India","Singapore","Japan","Germany","France","Italy","Spain","Brazil","Mexico","South Africa","South Korea","China","Indonesia","Philippines","Thailand","Malaysia","UAE","Ireland","Netherlands","Sweden","Norway","Denmark","Finland","Switzerland"].map(c => <option key={c}>{c}</option>)}
+        </select>
+
+        <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Gender</label>
+        <select style={{ ...inputStyle, marginTop: 6, marginBottom: 24 }}>
+          <option value="">Select your gender</option>
+          <option>Male</option><option>Female</option><option>Non-binary</option><option>Prefer not to say</option>
+        </select>
+
+        <button onClick={() => setConfig({ ...config, currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>Update Profile</button>
+      </div>
+
+      <div style={{ ...card, padding: 20, marginTop: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Account &amp; Sync</div>
+        {!isSyncConfigured ? (
+          <p style={{ fontSize: 13, color: T.muted, margin: 0, lineHeight: 1.6 }}>
+            Your data is saved on this device. Cloud sync isn't configured yet \u2014 add your Supabase keys (see SUPABASE_SETUP.md) and redeploy to sync across devices.
+          </p>
+        ) : session ? (<>
+          <p style={{ fontSize: 13, color: T.muted, margin: "0 0 4px" }}>Signed in as <strong style={{ color: T.text }}>{session.user.email}</strong></p>
+          <p style={{ fontSize: 12, color: T.dim, margin: "0 0 14px" }}>
+            {syncStatus === "saving" ? "Saving\u2026" : syncStatus === "offline" ? "Offline \u2014 changes sync when you reconnect." : syncStatus === "error" ? "Sync error." : "Synced across your devices \u2713"}
+          </p>
+          <button onClick={onSignOut} style={{ ...btnOutline, width: "100%", padding: 11 }}>Sign out</button>
+        </>) : (<>
+          <p style={{ fontSize: 13, color: T.muted, margin: "0 0 14px", lineHeight: 1.6 }}>
+            Sign in to sync your timeline, events, reflections, and milestones across your computer and iPhone.
+          </p>
+          <button onClick={onOpenAuth} style={{ ...btn, width: "100%", padding: 11 }}>Sign in or create account</button>
+        </>)}
+      </div>
+
+      <div style={{ ...card, padding: 20, marginTop: 16, borderColor: "rgba(236,72,153,0.25)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: T.pink, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Danger Zone</div>
+        <p style={{ fontSize: 13, color: T.muted, margin: "0 0 14px", lineHeight: 1.5 }}>
+          Clears your profile, events, reflections, and milestones from this device and starts fresh.
+        </p>
+        <button
+          onClick={() => {
+            if (window.confirm("Reset everything? This permanently deletes your saved data on this device and can't be undone.")) {
+              onReset();
+            }
+          }}
+          style={{ ...btnOutline, width: "100%", padding: 12, color: T.pink, borderColor: "rgba(236,72,153,0.35)" }}
+        >
+          Reset all data
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Onboarding (with emotional hook + retroactive events) ───────────────────
+
+function Onboarding({ onComplete, onOpenAuth, session }) {
+  const [step, setStep] = useState(0);
+  const [currentAge, setCurrentAge] = useState(30);
+  const [targetAge, setTargetAge] = useState(90);
+  const [importEvents, setImportEvents] = useState({});
+  const [selectedPreset, setSelectedPreset] = useState(null);
+  const [presetYear, setPresetYear] = useState("");
+
+  const birthYear = new Date().getFullYear() - currentAge;
+  const totalMonths = targetAge * 12;
+  const livedMonths = currentAge * 12;
+  const pctLived = ((livedMonths / totalMonths) * 100).toFixed(1);
+
+  // Step 0: Welcome
+  if (step === 0) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, background: T.gradientSoft }}>
+        <HourglassIcon size={72} />
+        <div style={{ marginTop: 14 }}><BrandTitle size={36} /></div>
+        <p style={{ color: T.muted, fontSize: 15, marginTop: 10, maxWidth: 300, textAlign: "center", lineHeight: 1.6 }}>
+          See your life in months. Plan with purpose. Make every moment count.
+        </p>
+        <button onClick={() => setStep(1)} style={{ ...btn, marginTop: 28, padding: "13px 44px", fontSize: 15 }}>Get Started</button>
+        {isSyncConfigured && !session && (
+          <button onClick={onOpenAuth} style={{ background: "none", border: "none", color: T.accentLight, fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 16 }}>
+            Already have an account? Sign in
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Step 1: Age setup
+  if (step === 1) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, background: T.gradientSoft }}>
+        <HourglassIcon size={48} />
+        <h2 style={{ color: T.text, fontSize: 22, fontWeight: 300, fontStyle: "italic", marginTop: 12 }}>About You</h2>
+        <p style={{ color: T.muted, fontSize: 13, marginBottom: 28 }}>We'll use this to build your life timeline.</p>
+        <div style={{ ...card, background: T.bgAlt, padding: 28, width: 360, maxWidth: "90vw" }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Current Age</label>
+          <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: "#7C3AED" }} />
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <span style={{ background: "rgba(124,58,237,0.15)", color: T.accentLight, padding: "3px 14px", borderRadius: 16, fontSize: 13, fontWeight: 700 }}>{currentAge} years old</span>
+          </div>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Target Age</label>
+          <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginTop: 8, accentColor: "#7C3AED" }} />
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <span style={{ background: "rgba(124,58,237,0.15)", color: T.accentLight, padding: "3px 14px", borderRadius: 16, fontSize: 13, fontWeight: 700 }}>{targetAge} years old</span>
+          </div>
+          <button onClick={() => setStep(2)} style={{ ...btn, width: "100%", padding: 13 }}>See My Timeline</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Step 2: Emotional hook — the full dot grid
+  if (step === 2) {
+    const endYear = birthYear + targetAge;
+    const tempEvents = {};
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "32px 24px", background: T.gradientSoft }}>
+        <h2 style={{ color: T.text, fontSize: 24, fontWeight: 300, fontStyle: "italic", margin: "0 0 6px" }}>This is your life</h2>
+        <p style={{ color: T.muted, fontSize: 14, marginBottom: 4 }}>
+          Each dot is one month. <span style={{ color: T.accentLight, fontWeight: 600 }}>{pctLived}%</span> is already behind you.
+        </p>
+        <p style={{ color: T.dim, fontSize: 12, marginBottom: 20 }}>
+          {livedMonths} months lived &middot; {totalMonths - livedMonths} months remaining
+        </p>
+        <div style={{ width: "100%", maxWidth: 900, overflowX: "auto", overflowY: "auto", maxHeight: "55vh", marginBottom: 20 }}>
+          <DotGrid birthYear={birthYear} events={tempEvents} startYear={birthYear} endYear={endYear} compact />
+        </div>
+        <p style={{ color: T.muted, fontSize: 13, textAlign: "center", maxWidth: 400, lineHeight: 1.6, marginBottom: 20 }}>
+          The filled dots are months you've already lived. The rest is what you have left. Let's make every one count.
+        </p>
+        <button onClick={() => setStep(3)} style={{ ...btn, padding: "13px 44px", fontSize: 15 }}>Fill In My Story</button>
+        <button onClick={() => onComplete({ currentAge, targetAge }, importEvents)} style={{ background: "none", border: "none", color: T.dim, fontSize: 13, cursor: "pointer", marginTop: 10 }}>Skip for now</button>
+      </div>
+    );
+  }
+
+  // Step 3: Retroactive life events
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", padding: "32px 24px", background: T.gradientSoft }}>
+      <h2 style={{ color: T.text, fontSize: 22, fontWeight: 300, fontStyle: "italic", margin: "0 0 6px" }}>Add your life story</h2>
+      <p style={{ color: T.muted, fontSize: 13, marginBottom: 24, textAlign: "center", maxWidth: 400 }}>
+        Tap events below to place them on your timeline. This makes your past come alive.
+      </p>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", maxWidth: 500, marginBottom: 20 }}>
+        {LIFE_PRESETS.map((preset, i) => {
+          const isAdded = Object.values(importEvents).flat().some(e => e.title === preset.title);
+          return (
+            <button key={i} onClick={() => {
+              if (!isAdded) { setSelectedPreset(preset); setPresetYear(""); }
+            }} style={{
+              padding: "8px 16px", borderRadius: 20, fontSize: 13, cursor: "pointer",
+              background: isAdded ? CAT_MAP[preset.category]?.color : "rgba(255,255,255,0.05)",
+              color: isAdded ? "#FFF" : T.muted,
+              border: isAdded ? "none" : `1px solid ${T.cardBorder}`,
+              display: "flex", alignItems: "center", gap: 6, fontWeight: 500,
+            }}>
+              <span>{preset.icon}</span>{preset.title}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedPreset && (
+        <div style={{ ...card, background: T.bgAlt, padding: 20, width: 320, marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 8 }}>{selectedPreset.icon} {selectedPreset.title}</div>
+          <label style={{ fontSize: 11, color: T.muted }}>What year?</label>
+          <input type="number" value={presetYear} onChange={(e) => setPresetYear(e.target.value)}
+            placeholder={`e.g. ${birthYear + 20}`} min={birthYear} max={new Date().getFullYear()}
+            style={{ ...inputStyle, marginTop: 4, marginBottom: 12 }} />
+          <button onClick={() => {
+            if (presetYear) {
+              const yr = parseInt(presetYear);
+              const key = `${yr}-6`;
+              setImportEvents(p => ({ ...p, [key]: [...(p[key] || []), { title: selectedPreset.title, category: selectedPreset.category, notes: "" }] }));
+              setSelectedPreset(null);
+            }
+          }} style={{ ...btn, width: "100%", padding: 10, fontSize: 13 }}>Add to Timeline</button>
+        </div>
+      )}
+
+      {Object.values(importEvents).flat().length > 0 && (
+        <div style={{ fontSize: 13, color: T.accentLight, marginBottom: 12 }}>
+          {Object.values(importEvents).flat().length} events added to your story
+        </div>
+      )}
+
+      <button onClick={() => onComplete({ currentAge, targetAge }, importEvents)} style={{ ...btn, padding: "13px 44px", fontSize: 15, marginTop: 8 }}>
+        Enter My Timeline
+      </button>
+    </div>
+  );
+}
+
+// ─── Main App ────────────────────────────────────────────────────────────────
+
+// ─── Cloud sync (Supabase) ───────────────────────────────────────────────────
+
+function readJSON(key) {
+  try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : null; } catch { return null; }
+}
 async function cloudLoad(uid) {
   if (!supabase) return { ok: false };
   const { data, error } = await supabase.from(STATE_TABLE).select("data").eq("user_id", uid).maybeSingle();
@@ -435,22 +1391,29 @@ async function cloudSave(uid, data) {
 }
 
 function SyncBadge({ session, syncStatus, onClick, compact }) {
-  const text = !isSyncConfigured ? "Local only" : !session ? "Sign in to sync"
-    : syncStatus === "saving" ? "Saving…" : syncStatus === "offline" ? "Offline" : syncStatus === "error" ? "Sync error" : "Synced";
+  const label = !isSyncConfigured ? "Local only"
+    : !session ? "Sign in to sync"
+    : syncStatus === "saving" ? "Saving\u2026"
+    : syncStatus === "offline" ? "Offline"
+    : syncStatus === "error" ? "Sync error"
+    : "Synced";
   const good = session && (syncStatus === "synced" || syncStatus === "idle");
   const warn = session && (syncStatus === "offline" || syncStatus === "error");
-  const color = good ? "#8CC7A1" : warn ? T.accentLight : T.muted;
+  const color = good ? "#34D399" : warn ? "#F59E0B" : T.muted;
   return (
-    <button onClick={onClick} title="Account & sync" style={{ display: "flex", alignItems: "center", gap: 6, padding: compact ? "5px 10px" : "7px 12px", borderRadius: 20, border: `1px solid ${T.cardBorder}`, background: "rgba(255,255,255,0.04)", color, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", fontFamily: SANS }}>
-      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />{text}
+    <button onClick={onClick} title="Account & sync" style={{
+      display: "flex", alignItems: "center", gap: 6, padding: compact ? "5px 10px" : "7px 12px",
+      borderRadius: 20, border: `1px solid ${T.cardBorder}`, background: "rgba(255,255,255,0.04)",
+      color, fontSize: compact ? 11 : 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+      {label}
     </button>
   );
 }
 
-const linkBtn = { background: "none", border: "none", color: T.accentLight, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0, fontFamily: SANS };
-
 function AuthModal({ session, syncStatus, onSignOut, recovery, onClose }) {
-  const [mode, setMode] = useState(recovery ? "reset" : "signin");
+  const [mode, setMode] = useState(recovery ? "reset" : "signin"); // signin | signup | forgot | reset
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState(null);
@@ -459,139 +1422,131 @@ function AuthModal({ session, syncStatus, onSignOut, recovery, onClose }) {
 
   const run = async (fn) => { setBusy(true); setErr(null); setMsg(null); try { await fn(); } catch (e) { setErr(e?.message || String(e)); } finally { setBusy(false); } };
   const signIn = () => run(async () => { const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password }); if (error) throw error; onClose(); });
-  const signUp = () => run(async () => { const { data, error } = await supabase.auth.signUp({ email: email.trim(), password }); if (error) throw error; if (data.session) onClose(); else setMsg("Almost there — check your email for a confirmation link, then sign in."); });
-  const forgot = () => run(async () => { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin }); if (error) throw error; setMsg("Reset email sent. Open the link on this device to set a new password."); });
-  const resetPw = () => run(async () => { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; setMsg("Password updated — you're signed in."); setTimeout(onClose, 1000); });
+  const signUp = () => run(async () => {
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    if (error) throw error;
+    if (data.session) onClose(); else setMsg("Almost there! Check your email for a confirmation link, then come back and sign in.");
+  });
+  const forgot = () => run(async () => { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin }); if (error) throw error; setMsg("Password reset email sent. Open the link on this device, then you'll be able to set a new password."); });
+  const resetPw = () => run(async () => { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; setMsg("Password updated \u2014 you're signed in."); setTimeout(onClose, 1000); });
 
   const wrap = (children) => (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: 16 }} onClick={onClose}>
-      <div style={{ ...card, background: T.bgAlt, padding: 26, width: 400, maxWidth: "92vw", border: "1px solid rgba(201,162,75,0.25)" }} onClick={(e) => e.stopPropagation()}>{children}</div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: 16 }} onClick={onClose}>
+      <div style={{ ...card, background: T.bgAlt, padding: 26, width: 400, maxWidth: "92vw", border: "1px solid rgba(124,58,237,0.25)" }} onClick={(e) => e.stopPropagation()}>{children}</div>
     </div>
   );
 
-  if (!isSyncConfigured) return wrap(<>
-    <h3 style={{ fontFamily: SERIF, fontWeight: 500, margin: "0 0 8px", color: T.text, fontSize: 22 }}>Sync isn't set up yet</h3>
-    <p style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, margin: "0 0 18px", fontFamily: SANS }}>Your data is saved on this device. Add your Supabase keys (see SUPABASE_SETUP.md), then redeploy to sync.</p>
-    <button onClick={onClose} style={{ ...btn, width: "100%", padding: 12 }}>Got it</button>
-  </>);
+  if (!isSyncConfigured) {
+    return wrap(<>
+      <h3 style={{ margin: "0 0 8px", color: T.text, fontSize: 20 }}>Cloud sync not set up yet</h3>
+      <p style={{ fontSize: 13, color: T.muted, lineHeight: 1.6, margin: "0 0 18px" }}>
+        Your data is being saved on this device. To sync across your computer and iPhone, add your Supabase keys (see SUPABASE_SETUP.md), then redeploy.
+      </p>
+      <button onClick={onClose} style={{ ...btn, width: "100%", padding: 12 }}>Got it</button>
+    </>);
+  }
 
-  if (session) return wrap(<>
-    <h3 style={{ fontFamily: SERIF, fontWeight: 500, margin: "0 0 4px", color: T.text, fontSize: 22 }}>Your account</h3>
-    <p style={{ fontSize: 13, color: T.muted, margin: "0 0 4px", fontFamily: SANS }}>{session.user.email}</p>
-    <p style={{ fontSize: 12, color: T.dim, margin: "0 0 20px", fontFamily: SANS }}>{syncStatus === "saving" ? "Saving…" : syncStatus === "offline" ? "Offline — will sync when reconnected" : syncStatus === "error" ? "Sync error" : "Synced across your devices"}</p>
-    <button onClick={() => { onSignOut(); onClose(); }} style={{ ...btnOutline, width: "100%", padding: 12, marginBottom: 10 }}>Sign out</button>
-    <button onClick={onClose} style={{ ...btn, width: "100%", padding: 12 }}>Close</button>
-  </>);
+  if (session) {
+    return wrap(<>
+      <h3 style={{ margin: "0 0 4px", color: T.text, fontSize: 20 }}>Your account</h3>
+      <p style={{ fontSize: 13, color: T.muted, margin: "0 0 4px" }}>{session.user.email}</p>
+      <p style={{ fontSize: 12, color: T.dim, margin: "0 0 20px" }}>
+        Status: {syncStatus === "saving" ? "saving\u2026" : syncStatus === "offline" ? "offline \u2014 will sync when reconnected" : syncStatus === "error" ? "sync error" : "synced across your devices"}
+      </p>
+      <button onClick={() => { onSignOut(); onClose(); }} style={{ ...btnOutline, width: "100%", padding: 12, marginBottom: 10 }}>Sign out</button>
+      <button onClick={onClose} style={{ ...btn, width: "100%", padding: 12 }}>Close</button>
+    </>);
+  }
 
   const titles = { signin: "Sign in", signup: "Create account", forgot: "Reset password", reset: "Set a new password" };
   return wrap(<>
-    <h3 style={{ fontFamily: SERIF, fontWeight: 500, margin: "0 0 4px", color: T.text, fontSize: 22 }}>{titles[mode]}</h3>
-    <p style={{ fontSize: 12, color: T.dim, margin: "0 0 18px", fontFamily: SANS }}>Keep your reflections across every device.</p>
+    <h3 style={{ margin: "0 0 4px", color: T.text, fontSize: 20 }}>{titles[mode]}</h3>
+    <p style={{ fontSize: 12, color: T.dim, margin: "0 0 18px" }}>Sync your timeline across every device.</p>
+
     {mode !== "reset" && (<>
-      <div style={label}>Email</div>
+      <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>Email</label>
       <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
     </>)}
     {mode !== "forgot" && (<>
-      <div style={label}>{mode === "reset" ? "New password" : "Password"}</div>
-      <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
+      <label style={{ fontSize: 11, fontWeight: 600, color: T.accentLight, textTransform: "uppercase", letterSpacing: 1 }}>{mode === "reset" ? "New password" : "Password"}</label>
+      <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" style={{ ...inputStyle, marginTop: 6, marginBottom: 14 }} />
     </>)}
-    {err && <div style={{ fontSize: 12, color: "#F0868B", marginBottom: 12, fontFamily: SANS }}>{err}</div>}
-    {msg && <div style={{ fontSize: 12, color: "#8CC7A1", marginBottom: 12, lineHeight: 1.5, fontFamily: SANS }}>{msg}</div>}
-    {mode === "signin" && <button onClick={signIn} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "Sign in"}</button>}
-    {mode === "signup" && <button onClick={signUp} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "Create account"}</button>}
-    {mode === "forgot" && <button onClick={forgot} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "Send reset email"}</button>}
-    {mode === "reset" && <button onClick={resetPw} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "Update password"}</button>}
+
+    {err && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 12 }}>{err}</div>}
+    {msg && <div style={{ fontSize: 12, color: "#34D399", marginBottom: 12, lineHeight: 1.5 }}>{msg}</div>}
+
+    {mode === "signin" && <button onClick={signIn} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Sign in"}</button>}
+    {mode === "signup" && <button onClick={signUp} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Create account"}</button>}
+    {mode === "forgot" && <button onClick={forgot} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Send reset email"}</button>}
+    {mode === "reset" && <button onClick={resetPw} disabled={busy} style={{ ...btn, width: "100%", padding: 12, opacity: busy ? 0.6 : 1 }}>{busy ? "\u2026" : "Update password"}</button>}
+
     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, fontSize: 12 }}>
       {mode === "signin" && <>
         <button onClick={() => { setMode("signup"); setErr(null); setMsg(null); }} style={linkBtn}>Create account</button>
         <button onClick={() => { setMode("forgot"); setErr(null); setMsg(null); }} style={linkBtn}>Forgot password?</button>
       </>}
-      {(mode === "signup" || mode === "forgot") && <button onClick={() => { setMode("signin"); setErr(null); setMsg(null); }} style={linkBtn}>← Back to sign in</button>}
+      {(mode === "signup" || mode === "forgot") && <button onClick={() => { setMode("signin"); setErr(null); setMsg(null); }} style={linkBtn}>{"\u2190"} Back to sign in</button>}
       {mode !== "reset" && <button onClick={onClose} style={{ ...linkBtn, marginLeft: "auto" }}>Close</button>}
     </div>
   </>);
 }
 
-// ─── Onboarding ───────────────────────────────────────────────────────────────
-function Onboarding({ onComplete, onOpenAuth, session }) {
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState("");
-  const [currentAge, setCurrentAge] = useState(30);
-  const [targetAge, setTargetAge] = useState(90);
+const linkBtn = { background: "none", border: "none", color: T.accentLight, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 };
 
-  if (step === 0) {
-    return (
-      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}` }}>
-        <HourMark size={56} />
-        <div style={{ marginTop: 18 }}><BrandTitle size={38} /></div>
-        <p style={{ fontFamily: SERIF, fontStyle: "italic", color: T.accentLight, fontSize: 18, marginTop: 12 }}>{CLOSING_QUOTE}</p>
-        <p style={{ fontFamily: SANS, color: T.muted, fontSize: 14, marginTop: 4, maxWidth: 300, textAlign: "center", lineHeight: 1.6 }}>See your life in weeks. Reflect. Live on purpose.</p>
-        <button onClick={() => setStep(1)} style={{ ...btn, marginTop: 30, padding: "13px 44px", fontSize: 15 }}>Begin</button>
-        {isSyncConfigured && !session && (
-          <button onClick={onOpenAuth} style={{ ...linkBtn, marginTop: 18 }}>Already have an account? Sign in</button>
-        )}
-      </div>
-    );
+// ─── Persistence (localStorage) ──────────────────────────────────────────────
+const STORAGE_KEY = "timetolive.v1";
+
+function loadStored() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
   }
-
-  return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}` }}>
-      <h2 style={{ fontFamily: SERIF, fontWeight: 500, color: T.text, fontSize: 26, marginBottom: 4 }}>A little about you</h2>
-      <p style={{ fontFamily: SANS, color: T.muted, fontSize: 13, marginBottom: 26 }}>This shapes your life in weeks.</p>
-      <div style={{ ...card, background: T.bgAlt, padding: 28, width: 360, maxWidth: "90vw" }}>
-        <div style={label}>Your name</div>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={{ ...inputStyle, marginTop: 6, marginBottom: 20 }} />
-        <div style={label}>Current age</div>
-        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{currentAge}</div>
-        <input type="range" min={1} max={100} value={currentAge} onChange={(e) => setCurrentAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 14, accentColor: T.accent }} />
-        <div style={label}>A life of</div>
-        <div style={{ textAlign: "center", margin: "8px 0 2px", fontFamily: SERIF, fontSize: 22, color: T.accentLight }}>{targetAge} years</div>
-        <input type="range" min={currentAge + 1} max={120} value={targetAge} onChange={(e) => setTargetAge(parseInt(e.target.value))} style={{ width: "100%", marginBottom: 4, accentColor: T.accent }} />
-        <button onClick={() => onComplete({ name: name.trim(), currentAge, targetAge })} style={{ ...btn, width: "100%", padding: 13 }}>See my weeks</button>
-      </div>
-    </div>
-  );
 }
 
-// ─── Persistence + app root ───────────────────────────────────────────────────
-const STORAGE_KEY = "timetolive.v1";
-function loadStored() { try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; } }
-
 export default function TimeToLive() {
+  // Lazy initializers run once on mount, restoring the user's saved data.
   const [config, setConfig] = useState(() => loadStored().config ?? null);
-  const [page, setPage] = useState("weeks");
+  const [page, setPage] = useState("dashboard");
+  const [events, setEvents] = useState(() => loadStored().events ?? {});
   const [reflections, setReflections] = useState(() => loadStored().reflections ?? []);
-  const [intentions, setIntentions] = useState(() => loadStored().intentions ?? []);
+  const [milestones, setMilestones] = useState(() => loadStored().milestones ?? []);
+  const [moreOpen, setMoreOpen] = useState(false);
 
+  // ── Cloud sync state ──
   const [session, setSession] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [recovery, setRecovery] = useState(false);
   const [syncStatus, setSyncStatus] = useState(isSyncConfigured ? "idle" : "local");
 
-  const stateRef = useRef({ config, reflections, intentions });
-  stateRef.current = { config, reflections, intentions };
+  const stateRef = useRef({ config, events, reflections, milestones });
+  stateRef.current = { config, events, reflections, milestones };
   const syncReadyRef = useRef(false);
   const saveTimer = useRef(null);
 
   const applyState = (s) => {
     setConfig(s?.config ?? null);
+    setEvents(s?.events ?? {});
     setReflections(s?.reflections ?? []);
-    setIntentions(s?.intentions ?? []);
+    setMilestones(s?.milestones ?? []);
   };
 
+  // Reconcile cloud <-> local data when a user signs in.
   const handleSignedIn = async (sess) => {
     setSession(sess);
     syncReadyRef.current = false;
     const uid = sess.user.id;
     const cached = readJSON(`timetolive.user.${uid}`);
-    if (cached?.config) applyState(cached);
+    if (cached?.config) applyState(cached); // instant from cache
     setSyncStatus("saving");
     const res = await cloudLoad(uid);
     if (!res.ok) { setSyncStatus("offline"); syncReadyRef.current = true; return; }
     if (res.data?.config) {
-      applyState(res.data);
+      applyState(res.data); // cloud is the source of truth
       try { localStorage.setItem(`timetolive.user.${uid}`, JSON.stringify(res.data)); } catch {}
     } else {
+      // Cloud is empty: migrate any work this device already had (e.g. before signing in).
       const local = stateRef.current;
       if (local?.config) {
         await cloudSave(uid, local);
@@ -602,77 +1557,122 @@ export default function TimeToLive() {
     syncReadyRef.current = true;
   };
 
+  // Subscribe to auth changes once on mount.
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => { if (data.session) handleSignedIn(data.session); });
     const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
       if (event === "PASSWORD_RECOVERY") { setRecovery(true); setAuthOpen(true); }
-      if (sess) handleSignedIn(sess);
-      else { syncReadyRef.current = false; setSession(null); applyState(readJSON(STORAGE_KEY) || {}); setSyncStatus(isSyncConfigured ? "idle" : "local"); }
+      if (sess) { handleSignedIn(sess); }
+      else {
+        // Signed out: revert to the anonymous local store (no user data left behind).
+        syncReadyRef.current = false;
+        setSession(null);
+        applyState(readJSON(STORAGE_KEY) || {});
+        setSyncStatus(isSyncConfigured ? "idle" : "local");
+      }
     });
     return () => sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Signed-out: persist to the shared local key (original behaviour).
   useEffect(() => {
     if (session) return;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ config, reflections, intentions })); } catch {}
-  }, [config, reflections, intentions, session]);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ config, events, reflections, milestones })); } catch {}
+  }, [config, events, reflections, milestones, session]);
 
+  // Signed-in: cache locally right away, then push to the cloud (debounced).
   useEffect(() => {
     if (!session) return;
     const uid = session.user.id;
-    const data = { config, reflections, intentions };
+    const data = { config, events, reflections, milestones };
     try { localStorage.setItem(`timetolive.user.${uid}`, JSON.stringify(data)); } catch {}
-    if (!syncReadyRef.current) return;
+    if (!syncReadyRef.current) return; // don't push until the initial load finished
     setSyncStatus("saving");
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => { const res = await cloudSave(uid, data); setSyncStatus(res.ok ? "synced" : "offline"); }, 800);
+    saveTimer.current = setTimeout(async () => {
+      const res = await cloudSave(uid, data);
+      setSyncStatus(res.ok ? "synced" : "offline");
+    }, 800);
     return () => clearTimeout(saveTimer.current);
-  }, [config, reflections, intentions, session]);
+  }, [config, events, reflections, milestones, session]);
 
+  // Flush to the cloud when the network reconnects.
   useEffect(() => {
-    const onOnline = () => { if (session && syncReadyRef.current) cloudSave(session.user.id, stateRef.current).then(r => setSyncStatus(r.ok ? "synced" : "offline")); };
+    const onOnline = () => {
+      if (session && syncReadyRef.current) {
+        cloudSave(session.user.id, stateRef.current).then(r => setSyncStatus(r.ok ? "synced" : "offline"));
+      }
+    };
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
   }, [session]);
 
   const signOut = async () => { if (supabase) await supabase.auth.signOut(); };
   const openAccount = () => { setRecovery(false); setAuthOpen(true); };
-  const handleOnboard = (cfg) => { setConfig(cfg); setPage("weeks"); };
+
+  const handleOnboard = (cfg, importedEvents) => {
+    setConfig(cfg);
+    if (importedEvents) setEvents(importedEvents);
+    setPage("dashboard");
+  };
+
   const resetAll = () => {
-    try { localStorage.removeItem(STORAGE_KEY); if (session) localStorage.removeItem(`timetolive.user.${session.user.id}`); } catch {}
-    if (session) cloudSave(session.user.id, { config: null, reflections: [], intentions: [] });
-    setReflections([]); setIntentions([]); setConfig(null); setPage("weeks");
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      if (session) localStorage.removeItem(`timetolive.user.${session.user.id}`);
+    } catch {}
+    if (session) cloudSave(session.user.id, { config: null, events: {}, reflections: [], milestones: [] });
+    setEvents({});
+    setReflections([]);
+    setMilestones([]);
+    setConfig(null);
+    setPage("dashboard");
   };
 
   const authModalEl = authOpen ? (
-    <AuthModal session={session} syncStatus={syncStatus} onSignOut={signOut} recovery={recovery} onClose={() => { setAuthOpen(false); setRecovery(false); }} />
+    <AuthModal session={session} syncStatus={syncStatus} onSignOut={signOut} recovery={recovery}
+      onClose={() => { setAuthOpen(false); setRecovery(false); }} />
   ) : null;
 
-  if (!config) return (<><GlobalStyles />{authModalEl}<Onboarding onComplete={handleOnboard} onOpenAuth={openAccount} session={session} /></>);
+  if (!config) return (<>
+    {authModalEl}
+    <Onboarding onComplete={handleOnboard} onOpenAuth={openAccount} session={session} syncStatus={syncStatus} />
+  </>);
+
+  const monthsRem = (config.targetAge - config.currentAge) * 12 - new Date().getMonth();
 
   const renderPage = () => {
     switch (page) {
-      case "weeks": return <WeeksPage config={config} />;
-      case "reflect": return <ReflectPage reflections={reflections} setReflections={setReflections} />;
-      case "intentions": return <IntentionsPage intentions={intentions} setIntentions={setIntentions} />;
-      case "settings": return <SettingsPage config={config} setConfig={setConfig} session={session} syncStatus={syncStatus} onOpenAuth={openAccount} onSignOut={signOut} onReset={resetAll} />;
-      default: return <WeeksPage config={config} />;
+      case "dashboard": return <DashboardPage config={config} events={events} setEvents={setEvents} setPage={setPage} />;
+      case "planner": return <PlannerPage config={config} events={events} setEvents={setEvents} />;
+      case "timeline": return <TimelinePage config={config} events={events} setEvents={setEvents} setPage={setPage} />;
+      case "balance": return <BalancePage events={events} config={config} />;
+      case "reflections": return <ReflectionsPage reflections={reflections} setReflections={setReflections} events={events} />;
+      case "milestones": return <MilestonesPage milestones={milestones} setMilestones={setMilestones} />;
+      case "coach": return <CoachPage config={config} events={events} />;
+      case "settings": return <SettingsPage config={config} setConfig={setConfig} setPage={setPage} onReset={resetAll} session={session} syncStatus={syncStatus} onOpenAuth={openAccount} onSignOut={signOut} />;
+      default: return null;
     }
   };
 
   return (
-    <div className="ttl-root" style={{ fontFamily: SANS, background: `radial-gradient(130% 100% at 50% -10%, rgba(255,255,255,0.035), transparent 55%), ${T.gradientSoft}`, display: "flex", position: "relative" }}>
-      <GlobalStyles />
-      <Ambience />
+    <div style={{
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
+      minHeight: "100vh", background: T.gradientSoft, display: "flex",
+    }}>
+      <ResponsiveStyles />
       {authModalEl}
-      <Sidebar page={page} setPage={setPage} session={session} syncStatus={syncStatus} onAccount={openAccount} />
-      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", display: "flex", flexDirection: "column", position: "relative", zIndex: 2 }}>
-        <MobileTopBar session={session} syncStatus={syncStatus} onAccount={openAccount} setPage={setPage} />
+      <Sidebar page={page} setPage={setPage} currentAge={config.currentAge} targetAge={config.targetAge} monthsRemaining={monthsRem}
+        session={session} syncStatus={syncStatus} onAccount={openAccount} />
+      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <MobileTopBar currentAge={config.currentAge} monthsRemaining={monthsRem}
+          session={session} syncStatus={syncStatus} onAccount={openAccount} />
         <div className="ttl-page" style={{ flex: 1 }}>{renderPage()}</div>
       </div>
-      <BottomNav page={page} setPage={setPage} />
+      <BottomNav page={page} setPage={setPage} moreOpen={moreOpen} setMoreOpen={setMoreOpen} />
+      {moreOpen && <MoreSheet page={page} setPage={setPage} onClose={() => setMoreOpen(false)} />}
     </div>
   );
 }
